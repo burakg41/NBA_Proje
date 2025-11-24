@@ -6,6 +6,7 @@ import numpy as np
 import os
 import json
 import time
+import plotly.express as px # Grafik için yeni kütüphane
 
 # --- NBA API ---
 from nba_api.stats.endpoints import leaguedashplayerstats
@@ -25,8 +26,7 @@ with st.sidebar:
     if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
-    st.info("Veri Kaynağı: Yahoo + NBA API")
-    st.caption("Kapsam: 14 Takım + Top 300 Free Agent")
+    st.info("Modül: Takas Sihirbazı & Radar")
 
 # --- NBA VERİSİ ---
 @st.cache_data(ttl=3600)
@@ -48,7 +48,6 @@ def get_nba_real_stats():
 def load_data():
     nba_stats_dict = get_nba_real_stats()
     
-    # Secrets Kontrolü
     if not os.path.exists('oauth2.json'):
         if 'yahoo_auth' in st.secrets:
             try:
@@ -57,12 +56,8 @@ def load_data():
                      secrets_dict['token_time'] = float(secrets_dict['token_time'])
                 with open('oauth2.json', 'w') as f:
                     json.dump(secrets_dict, f)
-            except:
-                st.error("Secrets hatası.")
-                return None
-        else:
-            st.error("Secrets bulunamadı.")
-            return None
+            except: return None
+        else: return None
 
     try:
         sc = OAuth2(None, None, from_file='oauth2.json')
@@ -77,16 +72,13 @@ def load_data():
                 target_league_key = lid
                 break
         
-        if not target_league_key:
-            st.error("Lig bulunamadı.")
-            return None
+        if not target_league_key: return None
 
         lg = gm.to_league(target_league_key)
         
         all_data = []
         teams = lg.teams()
         
-        # İlerleme Çubuğu
         progress_bar = st.progress(0, text="Lig taranıyor...")
         
         # 1. TAKIMLARI TARA
@@ -102,14 +94,12 @@ def load_data():
                     for pm, ps in zip(roster, stats):
                         process_player_final(pm, ps, t_name, "Sahipli", all_data, nba_stats_dict)
             except: pass
-            
             step += 1
-            progress_bar.progress(step / (total_teams + 1), text=f"{t_name} analiz edildi...")
+            progress_bar.progress(step / (total_teams + 1))
 
         # 2. FREE AGENT TARA (TOP 300)
         try:
             progress_bar.progress(0.90, text="🆓 300 Free Agent taranıyor...")
-            
             fa_players = lg.free_agents(None)[:300]
             fa_ids = [p['player_id'] for p in fa_players]
             
@@ -123,21 +113,12 @@ def load_data():
                         process_player_final(pm, ps, "🆓 FA", "Free Agent", all_data, nba_stats_dict)
                 except: pass
                 time.sleep(0.1)
-
-        except Exception as e:
-            pass
+        except: pass
 
         progress_bar.empty()
+        return pd.DataFrame(all_data) if all_data else None
         
-        if not all_data:
-            st.error("Veri yok.")
-            return None
-            
-        return pd.DataFrame(all_data)
-        
-    except Exception as e:
-        st.error(f"Hata: {e}")
-        return None
+    except Exception: return None
 
 def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
     try:
@@ -146,26 +127,21 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
             return float(val)
 
         p_name = meta['name']
-        
-        # Pozisyon
         raw_pos = meta.get('display_position', '')
         simple_pos = raw_pos.replace('PG', 'G').replace('SG', 'G').replace('SF', 'F').replace('PF', 'F')
         u_pos = list(set(simple_pos.split(',')))
         u_pos.sort(key=lambda x: 1 if x=='G' else (2 if x=='F' else 3))
         final_pos = ",".join(u_pos)
 
-        # NBA Verisi
         c_name = p_name.lower().replace('.', '').strip()
         real_gp = nba_dict.get(c_name, {}).get('GP', 0)
         real_mpg = nba_dict.get(c_name, {}).get('MPG', 0.0)
 
-        # Sakatlık
         st_code = meta.get('status', '')
         if st_code in ['INJ', 'O']: inj = f"🟥 {st_code}"
         elif st_code in ['GTD', 'DTD']: inj = f"Rx {st_code}"
         else: inj = "✅"
 
-        # DEĞİŞİKLİK BURADA: Yüzdeleri 100 ile çarpıyoruz (0.45 -> 45.0)
         fg_val = get_val(stat.get('FG%')) * 100
         ft_val = get_val(stat.get('FT%')) * 100
 
@@ -197,8 +173,10 @@ def calculate_z_scores(df):
         if c not in df.columns: df[c] = 0.0
         mean, std = df[c].mean(), df[c].std()
         if std == 0: std = 1
-        # Z-Score hesabı değişmez çünkü herkes 100 ile çarpıldığı için oran aynı kalır
         df[f'z_{c}'] = (mean - df[c]) / std if c == 'TO' else (df[c] - mean) / std
+    
+    # Genel Kalite Puanı (Takım yapısından bağımsız, oyuncu ne kadar iyi?)
+    df['Genel_Kalite'] = df[[f'z_{c}' for c in cats]].sum(axis=1)
     return df
 
 def analyze_needs(df, my_team):
@@ -210,11 +188,47 @@ def analyze_needs(df, my_team):
 
 def score_players(df, targets):
     df['Skor'] = 0
+    # Dinamik Puan (Senin takımına ne kadar uyuyor?)
     for c in ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']:
         if f'z_{c}' in df.columns:
             w = 3.0 if c in targets else 1.0
             df['Skor'] += df[f'z_{c}'] * w
     return df
+
+# --- TAKAS SİHİRBAZI MANTIĞI ---
+def generate_trade_proposals(df, my_team, targets):
+    # 1. Benim takımımdan satılacaklar (Skor'u en düşük olanlar = Takıma en az uyanlar)
+    my_players = df[df['Team'] == my_team].sort_values(by='Skor', ascending=True) # En kötü uyum en üstte
+    
+    # 2. Hedefler (Free Agent olmayan, başka takımlardaki oyuncular)
+    avail_targets = df[(df['Team'] != my_team) & (df['Owner_Status'] == 'Sahipli')].sort_values(by='Skor', ascending=False)
+    
+    proposals = []
+    
+    # Benim en "Gözden Çıkarılabilir" 6 oyuncum ile
+    # Ligin bana "En Faydalı" 25 oyuncusunu kıyasla
+    for _, my_p in my_players.head(6).iterrows():
+        for _, target in avail_targets.head(25).iterrows():
+            
+            # ADALET KONTROLÜ (FAIRNESS)
+            # Kimse LeBron verip vasat oyuncu almaz.
+            # Genel_Kalite (Z-Score toplamı) birbirine yakın olmalı.
+            quality_diff = target['Genel_Kalite'] - my_p['Genel_Kalite']
+            
+            # Eğer karşı tarafın oyuncusu çok daha kaliteliyse (Örn: +3 Z-Score farkı) takas reddedilir.
+            # Biraz esnek olalım: Kalite farkı +2.0'a kadar olan teklifleri gösterelim (Belki kandırabilirsin).
+            if quality_diff < 2.5: 
+                gain = target['Skor'] - my_p['Skor']
+                if gain > 2.0: # Sadece belirgin bir kazanç varsa öner
+                    proposals.append({
+                        'Ver': my_p['Player'],
+                        'Al': target['Player'],
+                        'Hedef Takım': target['Team'],
+                        'Takıma Uyum Kazancı': round(gain, 1),
+                        'Takas Zorluğu': "Kolay" if quality_diff < 0 else ("Orta" if quality_diff < 1.5 else "Zor (İkna Etmelisin)")
+                    })
+    
+    return pd.DataFrame(proposals)
 
 # --- ARAYÜZ ---
 st.title("🏀 Burak's GM Dashboard")
@@ -244,35 +258,47 @@ if df is not None and not df.empty:
 
         all_cols = ['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
 
-        tab1, tab2, tab3 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste", "🔄 Takas Sihirbazı"])
         
         with tab1:
             trade_df = v_df[v_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
-            st.dataframe(
-                trade_df[all_cols].head(50),
-                column_config={
-                    "Skor": st.column_config.ProgressColumn("Puan", format="%.1f", max_value=trade_df['Skor'].max()),
-                    "GP": st.column_config.NumberColumn("GP", width="small"),
-                    "MPG": st.column_config.NumberColumn("MPG", format="%.1f", width="small"),
-                    # DEĞİŞİKLİK BURADA: Formatı %.1f (sayı) yaptık, %.1% (yüzde) yerine.
-                    "FG%": st.column_config.NumberColumn("FG%", format="%.1f"), 
-                    "FT%": st.column_config.NumberColumn("FT%", format="%.1f"),
-                    "3PTM": st.column_config.NumberColumn("3PT", format="%.1f"),
-                    "PTS": st.column_config.NumberColumn("PTS", format="%.1f"),
-                    "REB": st.column_config.NumberColumn("REB", format="%.1f"),
-                    "AST": st.column_config.NumberColumn("AST", format="%.1f"),
-                    "ST": st.column_config.NumberColumn("ST", format="%.1f"),
-                    "BLK": st.column_config.NumberColumn("BLK", format="%.1f"),
-                    "TO": st.column_config.NumberColumn("TO", format="%.1f"),
-                },
-                use_container_width=True
-            )
+            st.dataframe(trade_df[all_cols].head(50), use_container_width=True)
+            
+            # --- RADAR GRAFİK (SEÇİLEN OYUNCU) ---
+            st.subheader("📊 Oyuncu Analizi (Radar)")
+            selected_player = st.selectbox("Oyuncu Seç:", trade_df['Player'].head(15))
+            
+            if selected_player:
+                p_data = df[df['Player'] == selected_player].iloc[0]
+                categories = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK'] # TO hariç (negatif olduğu için grafiği bozar)
+                # Z-Score'ları normalize edip (0-100 arası) grafiğe dökme mantığı (Basit gösterim için Z-Score kullanacağız)
+                values = [p_data[f'z_{c}'] for c in categories]
+                
+                fig = px.line_polar(r=values, theta=categories, line_close=True, title=f"{selected_player} Yetenek Dağılımı")
+                fig.update_traces(fill='toself')
+                st.plotly_chart(fig)
+
         with tab2:
-            st.dataframe(
-                df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)[all_cols],
-                use_container_width=True
-            )
+            st.dataframe(df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)[all_cols], use_container_width=True)
         with tab3:
             st.dataframe(v_df[all_cols], use_container_width=True)
+            
+        with tab4:
+            st.header("🤖 Akıllı Takas Önerileri")
+            st.info("Bu modül, senin takımına en az uyan oyuncuları bulur ve onları, senin eksiklerini kapatan rakip oyuncularla eşleştirir.")
+            
+            proposals_df = generate_trade_proposals(df, MY_TEAM_NAME, targets)
+            
+            if not proposals_df.empty:
+                st.dataframe(
+                    proposals_df,
+                    column_config={
+                        "Takıma Uyum Kazancı": st.column_config.ProgressColumn("Kazanç", min_value=0, max_value=10, format="+%.1f"),
+                    },
+                    use_container_width=True
+                )
+            else:
+                st.warning("Şu an mantıklı bir takas önerisi bulunamadı. Free Agent havuzuna bakmanı öneririm.")
+
 else:
-    st.info("Veriler yükleniyor (Top 300 FA biraz sürebilir)...")
+    st.info("Sistem başlatılıyor... (İlk açılışta kütüphaneler yüklenirken 1-2 dk sürebilir)")
