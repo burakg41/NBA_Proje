@@ -26,18 +26,51 @@ with st.sidebar:
 @st.cache_data(ttl=3600)
 def load_data():
     status_container = st.empty()
-    debug_container = st.expander("🛠️ Geliştirici / Hata Ayıklama Paneli", expanded=False)
     
-    # --- BULUT İÇİN GİZLİ DOSYA YARATMA (HEROKU/STREAMLIT CLOUD) ---
+    # ==========================================
+    # --- DEBUG / HATA AYIKLAMA BAŞLANGIÇ ---
+    # ==========================================
+    st.markdown("### 🛠️ DEBUG PENCERESİ")
+    try:
+        # Mevcut anahtarları göster (Değerleri gösterme, güvenlik için)
+        available_keys = list(st.secrets.keys())
+        st.write(f"Mevcut Secret Anahtarları: {available_keys}")
+        
+        if 'yahoo_auth' in st.secrets:
+            st.success("✅ [yahoo_auth] anahtarı algılandı!")
+            # İçindeki zorunlu alanları kontrol et
+            auth_keys = st.secrets['yahoo_auth']
+            required = ['consumer_key', 'consumer_secret', 'access_token']
+            missing = [k for k in required if k not in auth_keys]
+            if missing:
+                st.error(f"❌ Eksik Bilgiler Var: {missing}")
+            else:
+                st.info("✅ Gerekli tüm alt anahtarlar mevcut.")
+        else:
+            st.error("❌ [yahoo_auth] anahtarı BULUNAMADI. Secrets ayarlarını kontrol et.")
+    except Exception as e:
+        st.error(f"Debug sırasında hata: {e}")
+    st.markdown("---")
+    # ==========================================
+    # --- DEBUG BİTİŞ ---
+    # ==========================================
+
+    # --- BULUT İÇİN GİZLİ DOSYA YARATMA ---
     if not os.path.exists('oauth2.json'):
-        # Eğer bilgisayarında değilsek (dosya yoksa), Secrets'tan oluştur
         if 'yahoo_auth' in st.secrets:
             try:
+                # Secrets verisini JSON formatına çevirip dosyaya yazıyoruz
+                secrets_dict = dict(st.secrets['yahoo_auth'])
+                
+                # token_time sayı olmalı, kontrol edelim
+                if 'token_time' in secrets_dict:
+                     secrets_dict['token_time'] = float(secrets_dict['token_time'])
+                
                 with open('oauth2.json', 'w') as f:
-                    # Secrets verisini JSON dosyasına dönüştür
-                    json.dump(dict(st.secrets['yahoo_auth']), f)
+                    json.dump(secrets_dict, f)
+                st.caption("🔑 oauth2.json dosyası başarıyla oluşturuldu.")
             except Exception as e:
-                st.error(f"Secrets oluşturma hatası: {e}")
+                st.error(f"Secrets dosya oluşturma hatası: {e}")
                 return None
         else:
             st.error("❌ HATA: 'oauth2.json' bulunamadı ve Secrets ayarlanmamış!")
@@ -96,6 +129,7 @@ def load_data():
                             gp = get_val(p_stat.get('GP'))
                             pts = get_val(p_stat.get('PTS'))
                             
+                            # Hiç oynamamış oyuncuyu ele
                             if gp == 0 and pts == 0:
                                 continue
 
@@ -117,8 +151,8 @@ def load_data():
                         except:
                             continue
 
-            except Exception as e:
-                debug_container.warning(f"{t_name} çekilirken hata: {e}")
+            except Exception:
+                pass
             
             count += 1
             my_bar.progress(count / total_teams, text=f"{t_name} tamamlandı...")
