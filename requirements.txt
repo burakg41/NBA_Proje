@@ -6,3 +6,4 @@ numpy
 
 openpyxl
 nba_api
+plotly
