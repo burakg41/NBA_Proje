@@ -86,7 +86,7 @@ def load_data():
         all_data = []
         teams = lg.teams()
         
-        # İlerleme Çubuğu Ayarı
+        # İlerleme Çubuğu
         progress_bar = st.progress(0, text="Lig taranıyor...")
         
         # 1. TAKIMLARI TARA
@@ -106,32 +106,25 @@ def load_data():
             step += 1
             progress_bar.progress(step / (total_teams + 1), text=f"{t_name} analiz edildi...")
 
-        # 2. FREE AGENT TARA (TOP 300 - Chunk Yöntemi)
+        # 2. FREE AGENT TARA (TOP 300)
         try:
-            progress_bar.progress(0.90, text="🆓 300 Free Agent taranıyor (Bu işlem sürebilir)...")
+            progress_bar.progress(0.90, text="🆓 300 Free Agent taranıyor...")
             
-            # 300 Oyuncuyu Çek
             fa_players = lg.free_agents(None)[:300]
             fa_ids = [p['player_id'] for p in fa_players]
             
-            # Yahoo API çökmemesi için 25'erli paketler halinde soruyoruz
             chunk_size = 25
             for i in range(0, len(fa_ids), chunk_size):
                 chunk_ids = fa_ids[i:i + chunk_size]
                 chunk_players = fa_players[i:i + chunk_size]
-                
                 try:
                     chunk_stats = lg.player_stats(chunk_ids, ANALYSIS_TYPE)
                     for pm, ps in zip(chunk_players, chunk_stats):
                         process_player_final(pm, ps, "🆓 FA", "Free Agent", all_data, nba_stats_dict)
-                except:
-                    pass
-                
-                # Ufak bir bekleme (API boğulmasın)
+                except: pass
                 time.sleep(0.1)
 
         except Exception as e:
-            print(e)
             pass
 
         progress_bar.empty()
@@ -172,6 +165,10 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
         elif st_code in ['GTD', 'DTD']: inj = f"Rx {st_code}"
         else: inj = "✅"
 
+        # DEĞİŞİKLİK BURADA: Yüzdeleri 100 ile çarpıyoruz (0.45 -> 45.0)
+        fg_val = get_val(stat.get('FG%')) * 100
+        ft_val = get_val(stat.get('FT%')) * 100
+
         data_list.append({
             'Player': p_name,
             'Team': team_name,
@@ -180,8 +177,8 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
             'Health': inj,
             'GP': int(real_gp),
             'MPG': float(real_mpg),
-            'FG%': get_val(stat.get('FG%')),
-            'FT%': get_val(stat.get('FT%')),
+            'FG%': fg_val, 
+            'FT%': ft_val,
             '3PTM': get_val(stat.get('3PTM')),
             'PTS': get_val(stat.get('PTS')),
             'REB': get_val(stat.get('REB')),
@@ -200,6 +197,7 @@ def calculate_z_scores(df):
         if c not in df.columns: df[c] = 0.0
         mean, std = df[c].mean(), df[c].std()
         if std == 0: std = 1
+        # Z-Score hesabı değişmez çünkü herkes 100 ile çarpıldığı için oran aynı kalır
         df[f'z_{c}'] = (mean - df[c]) / std if c == 'TO' else (df[c] - mean) / std
     return df
 
@@ -244,7 +242,6 @@ if df is not None and not df.empty:
         if f_stat: v_df = v_df[v_df['Owner_Status'].isin(f_stat)]
         if h_inj: v_df = v_df[v_df['Health'].str.contains("✅")]
 
-        # GÖSTERİLECEK SÜTUNLAR (HEPSİ)
         all_cols = ['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
 
         tab1, tab2, tab3 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste"])
@@ -257,8 +254,9 @@ if df is not None and not df.empty:
                     "Skor": st.column_config.ProgressColumn("Puan", format="%.1f", max_value=trade_df['Skor'].max()),
                     "GP": st.column_config.NumberColumn("GP", width="small"),
                     "MPG": st.column_config.NumberColumn("MPG", format="%.1f", width="small"),
-                    "FG%": st.column_config.NumberColumn("FG%", format="%.1%"),
-                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"),
+                    # DEĞİŞİKLİK BURADA: Formatı %.1f (sayı) yaptık, %.1% (yüzde) yerine.
+                    "FG%": st.column_config.NumberColumn("FG%", format="%.1f"), 
+                    "FT%": st.column_config.NumberColumn("FT%", format="%.1f"),
                     "3PTM": st.column_config.NumberColumn("3PT", format="%.1f"),
                     "PTS": st.column_config.NumberColumn("PTS", format="%.1f"),
                     "REB": st.column_config.NumberColumn("REB", format="%.1f"),
