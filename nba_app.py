@@ -14,82 +14,50 @@ ANALYSIS_TYPE = 'average_season'
 
 st.set_page_config(page_title="Burak's GM Dashboard", layout="wide")
 
-# --- ÖNBELLEĞİ TEMİZLEME BUTONU ---
+# --- YAN PANEL ---
 with st.sidebar:
     st.header("Yönetim Paneli")
-    if st.button("🔄 Verileri Yenile & Önbelleği Sil"):
+    if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
-    st.info(f"📅 Analiz Modu: Sezon Ortalamaları")
+    
+    st.markdown("---")
+    st.info(f"📅 Mod: Sezon Ortalamaları")
+    st.caption("Veriler Free Agent havuzunu da içerir.")
 
-# --- VERİ YÜKLEME FONKSİYONU ---
+# --- VERİ YÜKLEME ---
 @st.cache_data(ttl=3600)
 def load_data():
     status_container = st.empty()
+    debug_container = st.expander("🛠️ Debug Paneli", expanded=False)
     
-    # ==========================================
-    # --- DEBUG / HATA AYIKLAMA BAŞLANGIÇ ---
-    # ==========================================
-    st.markdown("### 🛠️ DEBUG PENCERESİ")
-    try:
-        # Mevcut anahtarları göster (Değerleri gösterme, güvenlik için)
-        available_keys = list(st.secrets.keys())
-        st.write(f"Mevcut Secret Anahtarları: {available_keys}")
-        
-        if 'yahoo_auth' in st.secrets:
-            st.success("✅ [yahoo_auth] anahtarı algılandı!")
-            # İçindeki zorunlu alanları kontrol et
-            auth_keys = st.secrets['yahoo_auth']
-            required = ['consumer_key', 'consumer_secret', 'access_token']
-            missing = [k for k in required if k not in auth_keys]
-            if missing:
-                st.error(f"❌ Eksik Bilgiler Var: {missing}")
-            else:
-                st.info("✅ Gerekli tüm alt anahtarlar mevcut.")
-        else:
-            st.error("❌ [yahoo_auth] anahtarı BULUNAMADI. Secrets ayarlarını kontrol et.")
-    except Exception as e:
-        st.error(f"Debug sırasında hata: {e}")
-    st.markdown("---")
-    # ==========================================
-    # --- DEBUG BİTİŞ ---
-    # ==========================================
-
-    # --- BULUT İÇİN GİZLİ DOSYA YARATMA ---
+    # --- BULUT İÇİN GİZLİ DOSYA OLUŞTURMA ---
     if not os.path.exists('oauth2.json'):
         if 'yahoo_auth' in st.secrets:
             try:
-                # Secrets verisini JSON formatına çevirip dosyaya yazıyoruz
                 secrets_dict = dict(st.secrets['yahoo_auth'])
-                
-                # token_time sayı olmalı, kontrol edelim
                 if 'token_time' in secrets_dict:
                      secrets_dict['token_time'] = float(secrets_dict['token_time'])
-                
                 with open('oauth2.json', 'w') as f:
                     json.dump(secrets_dict, f)
-                st.caption("🔑 oauth2.json dosyası başarıyla oluşturuldu.")
             except Exception as e:
-                st.error(f"Secrets dosya oluşturma hatası: {e}")
+                st.error(f"Secrets hatası: {e}")
                 return None
         else:
-            st.error("❌ HATA: 'oauth2.json' bulunamadı ve Secrets ayarlanmamış!")
+            st.error("❌ oauth2.json yok ve Secrets ayarlanmamış!")
             return None
-    # -------------------------------------------------------------
+    # ----------------------------------------
 
     status_container.info("🚀 Yahoo sunucularına bağlanılıyor...")
     
     try:
-        # 1. Bağlantı
         sc = OAuth2(None, None, from_file='oauth2.json')
         if not sc.token_is_valid():
             sc.refresh_access_token()
         gm = yfa.Game(sc, 'nba')
         
-        # 2. Lig Bulma
         league_ids = gm.league_ids(year=SEASON_YEAR)
         target_league_key = None
-        
         for lid in league_ids:
             if TARGET_LEAGUE_ID in lid:
                 target_league_key = lid
@@ -101,15 +69,17 @@ def load_data():
 
         lg = gm.to_league(target_league_key)
         
-        # 3. Verileri Çekme
-        teams = lg.teams()
+        # --- VERİ ÇEKME AŞAMASI ---
         all_data = []
+        teams = lg.teams()
         
-        progress_text = "Veriler analiz ediliyor..."
-        my_bar = st.progress(0, text=progress_text)
-        total_teams = len(teams)
-        count = 0
-        
+        # İlerleme Çubuğu Ayarı
+        # 14 Takım + 1 Free Agent Taraması = Toplam Adım Sayısı
+        total_steps = len(teams) + 1 
+        progress_bar = st.progress(0, text="Analiz başlıyor...")
+        step_count = 0
+
+        # 1. ADIM: TAKIMLARI TARA (SAHİPLİ OYUNCULAR)
         for team_key in teams.keys():
             t_name = teams[team_key]['name']
             
@@ -119,49 +89,33 @@ def load_data():
                 
                 if p_ids:
                     stats = lg.player_stats(p_ids, ANALYSIS_TYPE)
-                    
                     for p_stat in stats:
-                        try:
-                            def get_val(val):
-                                if val == '-' or val is None: return 0.0
-                                return float(val)
-
-                            gp = get_val(p_stat.get('GP'))
-                            pts = get_val(p_stat.get('PTS'))
-                            
-                            # Hiç oynamamış oyuncuyu ele
-                            if gp == 0 and pts == 0:
-                                continue
-
-                            row = {
-                                'Player': p_stat['name'],
-                                'Team': t_name,
-                                'GP': gp,
-                                'FG%': get_val(p_stat.get('FG%')),
-                                'FT%': get_val(p_stat.get('FT%')),
-                                '3PTM': get_val(p_stat.get('3PTM')),
-                                'PTS': pts,
-                                'REB': get_val(p_stat.get('REB')),
-                                'AST': get_val(p_stat.get('AST')),
-                                'ST': get_val(p_stat.get('ST')),
-                                'BLK': get_val(p_stat.get('BLK')),
-                                'TO': get_val(p_stat.get('TO'))
-                            }
-                            all_data.append(row)
-                        except:
-                            continue
-
-            except Exception:
+                        process_player_stats(p_stat, t_name, "Sahipli", all_data)
+            except:
                 pass
             
-            count += 1
-            my_bar.progress(count / total_teams, text=f"{t_name} tamamlandı...")
+            step_count += 1
+            progress_bar.progress(step_count / total_steps, text=f"{t_name} tarandı...")
+
+        # 2. ADIM: FREE AGENTLARI TARA (BOŞTAKİLER)
+        try:
+            progress_bar.progress(0.95, text="🆓 Free Agent havuzu taranıyor (Top 60)...")
+            # En iyi 60 boşta oyuncuyu çek
+            fa_players = lg.free_agents(None)[:60] 
+            fa_ids = [p['player_id'] for p in fa_players]
             
-        my_bar.empty()
+            if fa_ids:
+                fa_stats = lg.player_stats(fa_ids, ANALYSIS_TYPE)
+                for p_stat in fa_stats:
+                    process_player_stats(p_stat, "🆓 FREE AGENT", "Free Agent", all_data)
+        except Exception as e:
+            debug_container.warning(f"FA Taramasında Hata: {e}")
+
+        progress_bar.empty()
         status_container.empty()
         
         if not all_data:
-            st.error("❌ Veri listesi boş! API yanıt vermedi.")
+            st.error("❌ Veri listesi boş!")
             return None
             
         return pd.DataFrame(all_data)
@@ -169,6 +123,53 @@ def load_data():
     except Exception as e:
         st.error(f"❌ GENEL HATA: {e}")
         return None
+
+def process_player_stats(p_stat, team_name, status_label, data_list):
+    """Yardımcı fonksiyon: Veriyi temizleyip listeye ekler"""
+    try:
+        def get_val(val):
+            if val == '-' or val is None: return 0.0
+            return float(val)
+
+        gp = get_val(p_stat.get('GP'))
+        pts = get_val(p_stat.get('PTS'))
+        
+        # Hiç oynamamış oyuncuyu atla
+        if gp == 0 and pts == 0:
+            return
+
+        # MPG (Minutes Per Game) Çekimi
+        mpg_raw = p_stat.get('MPG', '0')
+        if mpg_raw == '-': mpg_raw = '0'
+        # Bazen "34:20" gibi string gelir, bazen float. Basite indirgeyeliö.
+        try:
+            if ":" in str(mpg_raw):
+                parts = str(mpg_raw).split(":")
+                mpg = float(parts[0]) + (float(parts[1])/60)
+            else:
+                mpg = float(mpg_raw)
+        except:
+            mpg = 0.0
+
+        row = {
+            'Player': p_stat['name'],
+            'Team': team_name,
+            'Status': status_label, # Filtreleme için
+            'GP': int(gp),          # Maç Sayısı (Tamsayı)
+            'MPG': round(mpg, 1),   # Dakika (Virgüllü)
+            'FG%': get_val(p_stat.get('FG%')),
+            'FT%': get_val(p_stat.get('FT%')),
+            '3PTM': get_val(p_stat.get('3PTM')),
+            'PTS': pts,
+            'REB': get_val(p_stat.get('REB')),
+            'AST': get_val(p_stat.get('AST')),
+            'ST': get_val(p_stat.get('ST')),
+            'BLK': get_val(p_stat.get('BLK')),
+            'TO': get_val(p_stat.get('TO'))
+        }
+        data_list.append(row)
+    except:
+        pass
 
 def calculate_z_scores(df):
     cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
@@ -193,7 +194,6 @@ def analyze_team_needs(df, my_team_name):
     
     my_team_df = df[df['Team'] == my_team_name]
     if my_team_df.empty: 
-        st.warning(f"⚠️ '{my_team_name}' takımı verilerde bulunamadı.")
         return [], []
 
     team_profile = my_team_df[z_cols].sum().sort_values()
@@ -215,7 +215,7 @@ def score_players(df, targets):
 # --- ARAYÜZ ---
 
 st.title("🏀 Burak's Wizards - GM Paneli")
-st.markdown(f"**Veri Kaynağı:** 2025-2026 Sezon Ortalamaları (21 Ekim - Bugün)")
+st.markdown("**Veri Kaynağı:** 2025-2026 Sezonu (GP: Maç Sayısı | MPG: Ortalama Dakika)")
 st.markdown("---")
 
 df = load_data()
@@ -229,26 +229,41 @@ if df is not None and not df.empty:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.error(f"📉 **Takımının Eksikleri:** {', '.join(targets)}")
+            st.error(f"📉 **Eksiklerin:** {', '.join(targets)}")
         with col2:
-            st.success(f"📈 **Takımının Güçleri:** {', '.join(strengths)}")
+            st.success(f"📈 **Güçlerin:** {', '.join(strengths)}")
 
         st.markdown("---")
         
-        tab1, tab2, tab3 = st.tabs(["🔥 Takas Önerileri", "📋 Benim Kadrom", "🌍 Tüm Lig"])
+        # FİLTRELEME SEÇENEĞİ
+        filter_status = st.multiselect(
+            "Oyuncu Havuzunu Filtrele:",
+            options=["Sahipli", "Free Agent"],
+            default=["Sahipli", "Free Agent"]
+        )
+        
+        # Filtreye göre dataframe'i daralt
+        if filter_status:
+            filtered_df = df[df['Status'].isin(filter_status)]
+        else:
+            filtered_df = df
+
+        tab1, tab2, tab3 = st.tabs(["🔥 Hedef Oyuncular", "📋 Benim Kadrom", "🌍 Tüm Liste"])
 
         with tab1:
-            st.subheader("Hedef Oyuncular (Takas)")
-            st.caption("Eksiklerini kapatacak en iyi oyuncular:")
+            st.subheader("Önerilen Oyuncular (Sahipli + Free Agents)")
+            st.caption("Eksiklerini en iyi kapatanlar. 'Takım' sütununda 'FREE AGENT' yazanları bedavaya alabilirsin!")
             
-            trade_df = df[df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
+            # Kendi takımını hariç tut
+            trade_df = filtered_df[filtered_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             
             st.dataframe(
-                trade_df[['Player', 'Team', 'Skor'] + targets].head(20),
+                trade_df[['Player', 'Team', 'GP', 'MPG', 'Skor'] + targets].head(25),
                 column_config={
-                    "Skor": st.column_config.ProgressColumn(
-                        "Uygunluk", format="%.1f", min_value=0, max_value=trade_df['Skor'].max()
-                    ),
+                    "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", min_value=0, max_value=trade_df['Skor'].max()),
+                    "Team": st.column_config.TextColumn("Takım / Durum"),
+                    "GP": st.column_config.NumberColumn("Maç Sayısı"),
+                    "MPG": st.column_config.NumberColumn("Dakika (Ort)", format="%.1f")
                 },
                 use_container_width=True
             )
@@ -256,10 +271,13 @@ if df is not None and not df.empty:
         with tab2:
             st.subheader("Takım Analizin")
             my_team_df = df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
-            st.dataframe(my_team_df, use_container_width=True)
+            st.dataframe(
+                my_team_df[['Player', 'GP', 'MPG', 'Skor', 'PTS', 'REB', 'AST', 'ST', 'BLK']], 
+                use_container_width=True
+            )
 
         with tab3:
-            st.dataframe(df)
+            st.dataframe(filtered_df)
             
 else:
     st.info("⚠️ Veri bekleniyor...")
