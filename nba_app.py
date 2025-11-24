@@ -5,8 +5,9 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import time
 
-# --- NBA API (Dakika ve Maç Sayısı İçin) ---
+# --- NBA API ---
 from nba_api.stats.endpoints import leaguedashplayerstats
 
 # --- AYARLAR ---
@@ -25,28 +26,24 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.info("Veri Kaynağı: Yahoo + NBA API")
-    st.caption("Gösterilen İstatistikler: PTS, 3PTM, AST, ST, FT%")
+    st.caption("Kapsam: 14 Takım + Top 300 Free Agent")
 
-# --- NBA VERİSİNİ ÇEKEN FONKSİYON ---
+# --- NBA VERİSİ ---
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
     try:
         stats = leaguedashplayerstats.LeagueDashPlayerStats(season=NBA_SEASON_STRING, per_mode_detailed='PerGame')
         df = stats.get_data_frames()[0]
-        
         nba_data = {}
         for index, row in df.iterrows():
             clean_name = row['PLAYER_NAME'].lower().replace('.', '').strip()
-            nba_data[clean_name] = {
-                'GP': row['GP'],
-                'MPG': row['MIN']
-            }
+            nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN']}
         return nba_data
     except Exception as e:
-        st.warning(f"NBA verileri çekilemedi: {e}")
+        st.warning(f"NBA verisi çekilemedi: {e}")
         return {}
 
-# --- YAHOO VERİ YÜKLEME ---
+# --- YAHOO VERİSİ ---
 @st.cache_data(ttl=3600)
 def load_data():
     nba_stats_dict = get_nba_real_stats()
@@ -89,42 +86,58 @@ def load_data():
         all_data = []
         teams = lg.teams()
         
-        total_steps = len(teams) + 1
+        # İlerleme Çubuğu Ayarı
         progress_bar = st.progress(0, text="Lig taranıyor...")
-        step = 0
-
+        
         # 1. TAKIMLARI TARA
+        total_teams = len(teams)
+        step = 0
         for team_key in teams.keys():
             t_name = teams[team_key]['name']
             try:
                 roster = lg.to_team(team_key).roster()
                 p_ids = [p['player_id'] for p in roster]
-                
                 if p_ids:
                     stats = lg.player_stats(p_ids, ANALYSIS_TYPE)
-                    for player_meta, player_stat in zip(roster, stats):
-                        process_player_final(player_meta, player_stat, t_name, "Sahipli", all_data, nba_stats_dict)
-            except:
-                pass
+                    for pm, ps in zip(roster, stats):
+                        process_player_final(pm, ps, t_name, "Sahipli", all_data, nba_stats_dict)
+            except: pass
+            
             step += 1
-            progress_bar.progress(step / total_steps)
+            progress_bar.progress(step / (total_teams + 1), text=f"{t_name} analiz edildi...")
 
-        # 2. FREE AGENT TARA
+        # 2. FREE AGENT TARA (TOP 300 - Chunk Yöntemi)
         try:
-            progress_bar.progress(0.95, text="🆓 Free Agent havuzu taranıyor...")
-            fa_players = lg.free_agents(None)[:50]
+            progress_bar.progress(0.90, text="🆓 300 Free Agent taranıyor (Bu işlem sürebilir)...")
+            
+            # 300 Oyuncuyu Çek
+            fa_players = lg.free_agents(None)[:300]
             fa_ids = [p['player_id'] for p in fa_players]
-            if fa_ids:
-                fa_stats = lg.player_stats(fa_ids, ANALYSIS_TYPE)
-                for player_meta, player_stat in zip(fa_players, fa_stats):
-                    process_player_final(player_meta, player_stat, "🆓 FREE AGENT", "Free Agent", all_data, nba_stats_dict)
-        except:
+            
+            # Yahoo API çökmemesi için 25'erli paketler halinde soruyoruz
+            chunk_size = 25
+            for i in range(0, len(fa_ids), chunk_size):
+                chunk_ids = fa_ids[i:i + chunk_size]
+                chunk_players = fa_players[i:i + chunk_size]
+                
+                try:
+                    chunk_stats = lg.player_stats(chunk_ids, ANALYSIS_TYPE)
+                    for pm, ps in zip(chunk_players, chunk_stats):
+                        process_player_final(pm, ps, "🆓 FA", "Free Agent", all_data, nba_stats_dict)
+                except:
+                    pass
+                
+                # Ufak bir bekleme (API boğulmasın)
+                time.sleep(0.1)
+
+        except Exception as e:
+            print(e)
             pass
 
         progress_bar.empty()
         
         if not all_data:
-            st.error("Veri listesi boş.")
+            st.error("Veri yok.")
             return None
             
         return pd.DataFrame(all_data)
@@ -139,40 +152,32 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
             if val == '-' or val is None: return 0.0
             return float(val)
 
-        player_name = meta['name']
+        p_name = meta['name']
         
-        # Pozisyon Sadeleştirme
+        # Pozisyon
         raw_pos = meta.get('display_position', '')
         simple_pos = raw_pos.replace('PG', 'G').replace('SG', 'G').replace('SF', 'F').replace('PF', 'F')
-        unique_pos = list(set(simple_pos.split(',')))
-        def sort_order(p):
-            if p == 'G': return 1
-            if p == 'F': return 2
-            if p == 'C': return 3
-            return 4
-        unique_pos.sort(key=sort_order)
-        final_position = ",".join(unique_pos)
+        u_pos = list(set(simple_pos.split(',')))
+        u_pos.sort(key=lambda x: 1 if x=='G' else (2 if x=='F' else 3))
+        final_pos = ",".join(u_pos)
 
         # NBA Verisi
-        clean_name = player_name.lower().replace('.', '').strip()
-        real_gp = 0
-        real_mpg = 0.0
-        if clean_name in nba_dict:
-            real_gp = nba_dict[clean_name]['GP']
-            real_mpg = nba_dict[clean_name]['MPG']
+        c_name = p_name.lower().replace('.', '').strip()
+        real_gp = nba_dict.get(c_name, {}).get('GP', 0)
+        real_mpg = nba_dict.get(c_name, {}).get('MPG', 0.0)
 
         # Sakatlık
-        status_code = meta.get('status', '')
-        if status_code in ['INJ', 'O']: injury_display = f"🟥 {status_code}"
-        elif status_code in ['GTD', 'DTD']: injury_display = f"Rx {status_code}"
-        else: injury_display = "✅"
+        st_code = meta.get('status', '')
+        if st_code in ['INJ', 'O']: inj = f"🟥 {st_code}"
+        elif st_code in ['GTD', 'DTD']: inj = f"Rx {st_code}"
+        else: inj = "✅"
 
-        row = {
-            'Player': player_name,
+        data_list.append({
+            'Player': p_name,
             'Team': team_name,
             'Owner_Status': ownership,
-            'Pos': final_position,
-            'Health': injury_display,
+            'Pos': final_pos,
+            'Health': inj,
             'GP': int(real_gp),
             'MPG': float(real_mpg),
             'FG%': get_val(stat.get('FG%')),
@@ -184,42 +189,33 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
             'ST': get_val(stat.get('ST')),
             'BLK': get_val(stat.get('BLK')),
             'TO': get_val(stat.get('TO'))
-        }
-        data_list.append(row)
-    except:
-        pass
+        })
+    except: pass
 
 # --- ANALİZ ---
 def calculate_z_scores(df):
     cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
     if df.empty: return df
-    for cat in cats:
-        if cat not in df.columns: df[cat] = 0.0
-        mean = df[cat].mean()
-        std = df[cat].std()
+    for c in cats:
+        if c not in df.columns: df[c] = 0.0
+        mean, std = df[c].mean(), df[c].std()
         if std == 0: std = 1
-        col = f'z_{cat}'
-        if cat == 'TO': df[col] = (mean - df[cat]) / std
-        else: df[col] = (df[cat] - mean) / std
+        df[f'z_{c}'] = (mean - df[c]) / std if c == 'TO' else (df[c] - mean) / std
     return df
 
-def analyze_team_needs(df, my_team_name):
-    cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
-    z_cols = [f'z_{c}' for c in cats]
-    my_team_df = df[df['Team'] == my_team_name]
-    if my_team_df.empty: return [], []
-    profile = my_team_df[z_cols].sum().sort_values()
-    weak = [w.replace('z_', '') for w in profile.head(4).index]
-    strong = [s.replace('z_', '') for s in profile.tail(3).index]
-    return weak, strong
+def analyze_needs(df, my_team):
+    z_cols = [f'z_{c}' for c in ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']]
+    m_df = df[df['Team'] == my_team]
+    if m_df.empty: return [], []
+    prof = m_df[z_cols].sum().sort_values()
+    return [x.replace('z_', '') for x in prof.head(4).index], [x.replace('z_', '') for x in prof.tail(3).index]
 
 def score_players(df, targets):
     df['Skor'] = 0
-    cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
-    for cat in cats:
-        if f'z_{cat}' in df.columns:
-            w = 3.0 if cat in targets else 1.0
-            df['Skor'] += df[f'z_{cat}'] * w
+    for c in ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']:
+        if f'z_{c}' in df.columns:
+            w = 3.0 if c in targets else 1.0
+            df['Skor'] += df[f'z_{c}'] * w
     return df
 
 # --- ARAYÜZ ---
@@ -230,58 +226,55 @@ df = load_data()
 
 if df is not None and not df.empty:
     df = calculate_z_scores(df)
-    targets, strengths = analyze_team_needs(df, MY_TEAM_NAME)
+    targets, strengths = analyze_needs(df, MY_TEAM_NAME)
     
     if targets:
         df = score_players(df, targets)
-        col1, col2 = st.columns(2)
-        col1.error(f"📉 İhtiyaçlar: {', '.join(targets)}")
-        col2.success(f"📈 Güçlü Yanlar: {', '.join(strengths)}")
+        c1, c2 = st.columns(2)
+        c1.error(f"📉 İhtiyaç: {', '.join(targets)}")
+        c2.success(f"📈 Güçlü: {', '.join(strengths)}")
         
         st.markdown("---")
         
-        c1, c2 = st.columns(2)
-        f_status = c1.multiselect("Filtre:", ["Sahipli", "Free Agent"], default=["Sahipli", "Free Agent"])
-        hide_inj = c2.checkbox("Sadece Sağlamlar (✅)", value=False)
+        col1, col2 = st.columns(2)
+        f_stat = col1.multiselect("Filtre:", ["Sahipli", "Free Agent"], default=["Sahipli", "Free Agent"])
+        h_inj = col2.checkbox("Sakatları Gizle (✅)", value=False)
         
-        view_df = df.copy()
-        if f_status: view_df = view_df[view_df['Owner_Status'].isin(f_status)]
-        if hide_inj: view_df = view_df[view_df['Health'].str.contains("✅")]
+        v_df = df.copy()
+        if f_stat: v_df = v_df[v_df['Owner_Status'].isin(f_stat)]
+        if h_inj: v_df = v_df[v_df['Health'].str.contains("✅")]
+
+        # GÖSTERİLECEK SÜTUNLAR (HEPSİ)
+        all_cols = ['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
 
         tab1, tab2, tab3 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste"])
         
-        # GÖSTERİLECEK SÜTUNLAR
-        # Kullanıcının istediği istatistikleri buraya sabitliyoruz
-        show_cols = ['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'PTS', '3PTM', 'AST', 'ST', 'FT%']
-
         with tab1:
-            trade_df = view_df[view_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
+            trade_df = v_df[v_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             st.dataframe(
-                trade_df[show_cols].head(30),
+                trade_df[all_cols].head(50),
                 column_config={
-                    "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=trade_df['Skor'].max()),
-                    "GP": st.column_config.NumberColumn("Maç"),
-                    "MPG": st.column_config.NumberColumn("Dakika", format="%.1f"),
-                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"), # Yüzde formatı
-                    "PTS": st.column_config.NumberColumn("Sayı", format="%.1f"),
-                    "AST": st.column_config.NumberColumn("Asist", format="%.1f"),
-                    "ST": st.column_config.NumberColumn("Top Çalma", format="%.1f"),
-                    "3PTM": st.column_config.NumberColumn("3 Sayı", format="%.1f"),
+                    "Skor": st.column_config.ProgressColumn("Puan", format="%.1f", max_value=trade_df['Skor'].max()),
+                    "GP": st.column_config.NumberColumn("GP", width="small"),
+                    "MPG": st.column_config.NumberColumn("MPG", format="%.1f", width="small"),
+                    "FG%": st.column_config.NumberColumn("FG%", format="%.1%"),
+                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"),
+                    "3PTM": st.column_config.NumberColumn("3PT", format="%.1f"),
+                    "PTS": st.column_config.NumberColumn("PTS", format="%.1f"),
+                    "REB": st.column_config.NumberColumn("REB", format="%.1f"),
+                    "AST": st.column_config.NumberColumn("AST", format="%.1f"),
+                    "ST": st.column_config.NumberColumn("ST", format="%.1f"),
+                    "BLK": st.column_config.NumberColumn("BLK", format="%.1f"),
+                    "TO": st.column_config.NumberColumn("TO", format="%.1f"),
                 },
                 use_container_width=True
             )
         with tab2:
-            my_team = df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             st.dataframe(
-                my_team[show_cols + ['REB', 'BLK', 'TO', 'FG%']], # Kadrom sekmesinde diğerlerini de gösterelim
-                column_config={
-                    "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=my_team['Skor'].max()),
-                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"),
-                    "FG%": st.column_config.NumberColumn("FG%", format="%.1%"),
-                },
+                df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)[all_cols],
                 use_container_width=True
             )
         with tab3:
-            st.dataframe(view_df)
+            st.dataframe(v_df[all_cols], use_container_width=True)
 else:
-    st.info("Veriler yükleniyor...")
+    st.info("Veriler yükleniyor (Top 300 FA biraz sürebilir)...")
