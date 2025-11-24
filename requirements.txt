@@ -3,4 +3,6 @@ yahoo-fantasy-api
 yahoo_oauth
 pandas
 numpy
+
 openpyxl
+nba_api
