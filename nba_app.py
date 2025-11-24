@@ -10,7 +10,10 @@ import json
 SEASON_YEAR = 2025
 TARGET_LEAGUE_ID = "61142" 
 MY_TEAM_NAME = "Burak's Wizards"
-ANALYSIS_TYPE = 'average_season' 
+
+# DİKKAT: Artık 'average_season' değil 'season' (Toplamlar) çekiyoruz.
+# Ortalamayı kendimiz hesaplayacağız, böylesi çok daha garanti.
+ANALYSIS_TYPE = 'season' 
 
 st.set_page_config(page_title="Burak's GM Dashboard", layout="wide")
 
@@ -20,7 +23,7 @@ with st.sidebar:
     if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
-    st.info(f"📅 Mod: Sezon Ortalamaları")
+    st.info(f"📅 Mod: Sezon Toplamları -> Ortalamalar")
 
 # --- VERİ YÜKLEME ---
 @st.cache_data(ttl=3600)
@@ -75,23 +78,20 @@ def load_data():
         for team_key in teams.keys():
             t_name = teams[team_key]['name']
             try:
-                # Roster, oyuncunun sakatlık durumunu (status) içerir
                 roster = lg.to_team(team_key).roster()
                 p_ids = [p['player_id'] for p in roster]
                 
                 if p_ids:
-                    # İstatistikleri çek
+                    # 'season' = Toplam İstatistikler (GP burada kesin vardır)
                     stats = lg.player_stats(p_ids, ANALYSIS_TYPE)
                     
-                    # Roster ve Stats listelerini eşleştir (Zip ile)
                     for player_meta, player_stat in zip(roster, stats):
-                        process_player_data(player_meta, player_stat, t_name, "Sahipli", all_data)
-                        
+                        process_player_totals(player_meta, player_stat, t_name, "Sahipli", all_data)
             except:
                 pass
             
             step_count += 1
-            progress_bar.progress(step_count / total_steps, text=f"{t_name} tarandı...")
+            progress_bar.progress(step_count / total_steps, text=f"{t_name} taranıyor...")
 
         # 2. ADIM: FREE AGENTLARI TARA
         try:
@@ -102,7 +102,7 @@ def load_data():
             if fa_ids:
                 fa_stats = lg.player_stats(fa_ids, ANALYSIS_TYPE)
                 for player_meta, player_stat in zip(fa_players, fa_stats):
-                    process_player_data(player_meta, player_stat, "🆓 FREE AGENT", "Free Agent", all_data)
+                    process_player_totals(player_meta, player_stat, "🆓 FREE AGENT", "Free Agent", all_data)
         except Exception as e:
             st.warning(f"FA Hatası: {e}")
 
@@ -119,70 +119,68 @@ def load_data():
         st.error(f"❌ GENEL HATA: {e}")
         return None
 
-def process_player_data(meta, stat, team_name, ownership_status, data_list):
+def process_player_totals(meta, stat, team_name, ownership_status, data_list):
     """
-    meta: Roster'dan gelen veri (Status, Isim vb. içerir)
-    stat: Player Stats'tan gelen veri (Sayı, GP, MPG içerir)
+    Toplam verileri alır, GP'ye bölerek Ortalamaya çevirir.
     """
     try:
-        # GP (Maç Sayısı) Kontrolü
-        gp = 0
-        if 'GP' in stat and stat['GP'] != '-':
-            gp = int(stat['GP'])
+        def get_val(val):
+            if val == '-' or val is None: return 0.0
+            return float(val)
+
+        # 1. GP (Maç Sayısı) - En Kritik Veri
+        gp = get_val(stat.get('GP'))
         
-        # Eğer GP 0 ise ve hiç puanı yoksa bu oyuncuyu atla
-        pts_val = stat.get('PTS')
-        if gp == 0 and (pts_val == '-' or pts_val is None or float(pts_val) == 0):
+        # Eğer GP 0 ise hesaplama yapamayız (Sıfıra bölünme hatası olur)
+        if gp == 0:
             return
 
-        # MPG (Dakika) Kontrolü - En Zor Kısım
-        # Yahoo bazen "30:15", bazen "30.5", bazen "-" döndürür.
-        mpg = 0.0
-        # MPG verisini bulmaya çalış (Bazen MPG, bazen MIN etiketiyle gelir)
-        raw_mpg = stat.get('MPG', stat.get('MIN', '0'))
+        # 2. MPG (Dakika) Hesaplama
+        # Yahoo'da Toplam dakika bazen 'MIN' bazen 'MPG' etiketiyle gelir
+        # Örnek veri: "540:30" (540 dakika 30 saniye)
+        total_minutes = 0.0
+        raw_min = stat.get('MIN', stat.get('MPG', '0'))
         
-        if raw_mpg and raw_mpg != '-':
-            raw_mpg = str(raw_mpg)
-            if ":" in raw_mpg:
-                # "30:30" formatını "30.5" formatına çevir
-                parts = raw_mpg.split(":")
-                try:
-                    mpg = float(parts[0]) + (float(parts[1]) / 60.0)
-                except:
-                    mpg = 0.0
+        if raw_min and raw_min != '-':
+            raw_min = str(raw_min)
+            if ":" in raw_min:
+                parts = raw_min.split(":")
+                total_minutes = float(parts[0]) + (float(parts[1]) / 60.0)
             else:
-                try:
-                    mpg = float(raw_mpg)
-                except:
-                    mpg = 0.0
+                total_minutes = float(raw_min)
+        
+        mpg = total_minutes / gp # Toplam Dakika / Maç Sayısı
 
-        # Sakatlık Durumu (INJ, GTD, O)
-        status_code = meta.get('status', '') # Örn: 'INJ', 'DTD'
+        # 3. İstatistikleri Ortalamaya Çevirme
+        # Yüzdeler (FG%, FT%) zaten yüzde gelir, bölünmez.
+        # Sayısal değerler (PTS, REB, AST) bölünür.
+        
+        fg_pct = get_val(stat.get('FG%'))
+        ft_pct = get_val(stat.get('FT%'))
+        
+        # Sakatlık Durumu
+        status_code = meta.get('status', '')
         if status_code:
             status_display = f"⚠️ {status_code.upper()}"
         else:
             status_display = "✅ Sağlam"
 
-        def get_val(val):
-            if val == '-' or val is None: return 0.0
-            return float(val)
-
         row = {
             'Player': meta['name'],
             'Team': team_name,
-            'Owner_Status': ownership_status, # Filtre için
-            'Injury': status_display,         # Ekranda görünecek sakatlık bilgisi
-            'GP': gp,
+            'Owner_Status': ownership_status,
+            'Injury': status_display,
+            'GP': int(gp),
             'MPG': round(mpg, 1),
-            'FG%': get_val(stat.get('FG%')),
-            'FT%': get_val(stat.get('FT%')),
-            '3PTM': get_val(stat.get('3PTM')),
-            'PTS': get_val(stat.get('PTS')),
-            'REB': get_val(stat.get('REB')),
-            'AST': get_val(stat.get('AST')),
-            'ST': get_val(stat.get('ST')),
-            'BLK': get_val(stat.get('BLK')),
-            'TO': get_val(stat.get('TO'))
+            'FG%': fg_pct, # Yüzdeler bölünmez
+            'FT%': ft_pct, # Yüzdeler bölünmez
+            '3PTM': round(get_val(stat.get('3PTM')) / gp, 1),
+            'PTS': round(get_val(stat.get('PTS')) / gp, 1),
+            'REB': round(get_val(stat.get('REB')) / gp, 1),
+            'AST': round(get_val(stat.get('AST')) / gp, 1),
+            'ST': round(get_val(stat.get('ST')) / gp, 1),
+            'BLK': round(get_val(stat.get('BLK')) / gp, 1),
+            'TO': round(get_val(stat.get('TO')) / gp, 1)
         }
         data_list.append(row)
     except Exception:
@@ -229,7 +227,7 @@ def score_players(df, targets):
 # --- ARAYÜZ ---
 
 st.title("🏀 Burak's Wizards - GM Paneli")
-st.markdown("**Veri Kaynağı:** 2025 Sezon Ortalamaları")
+st.markdown("**Veri Kaynağı:** Sezon Toplamlarından Hesaplanan Ortalamalar (Kesin Veri)")
 st.markdown("---")
 
 df = load_data()
@@ -262,7 +260,6 @@ if df is not None and not df.empty:
             filtered_df = filtered_df[filtered_df['Owner_Status'].isin(filter_status)]
         
         if hide_injured:
-            # "Sağlam" dışındakileri ele veya sadece INJ/O olanları çıkar
             filtered_df = filtered_df[filtered_df['Injury'].str.contains("Sağlam|DTD")]
 
         tab1, tab2, tab3 = st.tabs(["🔥 Hedef Oyuncular", "📋 Kadrom", "🌍 Tüm Liste"])
@@ -276,7 +273,8 @@ if df is not None and not df.empty:
                 column_config={
                     "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", min_value=0, max_value=trade_df['Skor'].max()),
                     "Injury": st.column_config.TextColumn("Sağlık"),
-                    "MPG": st.column_config.NumberColumn("Dakika", format="%.1f"),
+                    "MPG": st.column_config.NumberColumn("Dakika (Ort)", format="%.1f"),
+                    "GP": st.column_config.NumberColumn("Maç"),
                 },
                 use_container_width=True
             )
