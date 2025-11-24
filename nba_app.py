@@ -6,15 +6,12 @@ import numpy as np
 import os
 import json
 
-# --- NBA API EKLEMESİ ---
-# NBA'den gerçek maç ve dakika verilerini çekmek için
+# --- NBA API (Dakika ve Maç Sayısı İçin) ---
 from nba_api.stats.endpoints import leaguedashplayerstats
 
 # --- AYARLAR ---
 SEASON_YEAR = 2025
-# NBA API Sezon Formatı (2025-26 Sezonu için)
 NBA_SEASON_STRING = '2025-26' 
-
 TARGET_LEAGUE_ID = "61142" 
 MY_TEAM_NAME = "Burak's Wizards"
 ANALYSIS_TYPE = 'average_season' 
@@ -27,26 +24,22 @@ with st.sidebar:
     if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
-    st.info("Veri Kaynağı: Yahoo (Puanlar) + NBA.com (Dakika/Maç)")
+    st.info("Veri Kaynağı: Yahoo + NBA API")
+    st.caption("Gösterilen İstatistikler: PTS, 3PTM, AST, ST, FT%")
 
 # --- NBA VERİSİNİ ÇEKEN FONKSİYON ---
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
-    """NBA.com'dan tüm oyuncuların gerçek GP ve MPG verilerini çeker"""
     try:
-        # Tüm ligin istatistiklerini tek seferde çekiyoruz (Hızlı olması için)
         stats = leaguedashplayerstats.LeagueDashPlayerStats(season=NBA_SEASON_STRING, per_mode_detailed='PerGame')
         df = stats.get_data_frames()[0]
         
-        # Bize sadece İsim, GP (Maç) ve MIN (Dakika) lazım
-        # İsimleri standartlaştıralım (Büyük/küçük harf sorunu olmasın diye)
         nba_data = {}
         for index, row in df.iterrows():
-            # Oyuncu ismini temizle
             clean_name = row['PLAYER_NAME'].lower().replace('.', '').strip()
             nba_data[clean_name] = {
                 'GP': row['GP'],
-                'MPG': row['MIN'] # NBA API dakika ortalamasını verir
+                'MPG': row['MIN']
             }
         return nba_data
     except Exception as e:
@@ -56,7 +49,6 @@ def get_nba_real_stats():
 # --- YAHOO VERİ YÜKLEME ---
 @st.cache_data(ttl=3600)
 def load_data():
-    # Önce NBA Verilerini Hazırla
     nba_stats_dict = get_nba_real_stats()
     
     # Secrets Kontrolü
@@ -111,7 +103,6 @@ def load_data():
                 if p_ids:
                     stats = lg.player_stats(p_ids, ANALYSIS_TYPE)
                     for player_meta, player_stat in zip(roster, stats):
-                        # NBA Sözlüğünü de fonksiyona gönderiyoruz
                         process_player_final(player_meta, player_stat, t_name, "Sahipli", all_data, nba_stats_dict)
             except:
                 pass
@@ -150,22 +141,25 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
 
         player_name = meta['name']
         
-        # --- NBA VERİSİ EŞLEŞTİRME ---
-        # Yahoo'daki ismi temizle (noktaları sil, küçült)
+        # Pozisyon Sadeleştirme
+        raw_pos = meta.get('display_position', '')
+        simple_pos = raw_pos.replace('PG', 'G').replace('SG', 'G').replace('SF', 'F').replace('PF', 'F')
+        unique_pos = list(set(simple_pos.split(',')))
+        def sort_order(p):
+            if p == 'G': return 1
+            if p == 'F': return 2
+            if p == 'C': return 3
+            return 4
+        unique_pos.sort(key=sort_order)
+        final_position = ",".join(unique_pos)
+
+        # NBA Verisi
         clean_name = player_name.lower().replace('.', '').strip()
-        
-        # NBA sözlüğünden bu ismi bulmaya çalış
         real_gp = 0
         real_mpg = 0.0
-        
         if clean_name in nba_dict:
             real_gp = nba_dict[clean_name]['GP']
             real_mpg = nba_dict[clean_name]['MPG']
-        else:
-            # Tam eşleşme yoksa (İsim farklılığı varsa) basit Yahoo verisine dön
-            # Ama senin ligde Yahoo bu veriyi vermiyor, o yüzden 0 kalır.
-            pass
-        # -----------------------------
 
         # Sakatlık
         status_code = meta.get('status', '')
@@ -173,19 +167,14 @@ def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
         elif status_code in ['GTD', 'DTD']: injury_display = f"Rx {status_code}"
         else: injury_display = "✅"
 
-        position = meta.get('display_position', '-')
-
         row = {
             'Player': player_name,
             'Team': team_name,
             'Owner_Status': ownership,
-            'Pos': position,
+            'Pos': final_position,
             'Health': injury_display,
-            
-            # BURAYA DİKKAT: Artık gerçek NBA verisi kullanıyoruz
             'GP': int(real_gp),
             'MPG': float(real_mpg),
-            
             'FG%': get_val(stat.get('FG%')),
             'FT%': get_val(stat.get('FT%')),
             '3PTM': get_val(stat.get('3PTM')),
@@ -261,21 +250,35 @@ if df is not None and not df.empty:
 
         tab1, tab2, tab3 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste"])
         
+        # GÖSTERİLECEK SÜTUNLAR
+        # Kullanıcının istediği istatistikleri buraya sabitliyoruz
+        show_cols = ['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'PTS', '3PTM', 'AST', 'ST', 'FT%']
+
         with tab1:
             trade_df = view_df[view_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             st.dataframe(
-                trade_df[['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor'] + targets].head(30),
+                trade_df[show_cols].head(30),
                 column_config={
                     "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=trade_df['Skor'].max()),
                     "GP": st.column_config.NumberColumn("Maç"),
-                    "MPG": st.column_config.NumberColumn("Dakika", format="%.1f")
+                    "MPG": st.column_config.NumberColumn("Dakika", format="%.1f"),
+                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"), # Yüzde formatı
+                    "PTS": st.column_config.NumberColumn("Sayı", format="%.1f"),
+                    "AST": st.column_config.NumberColumn("Asist", format="%.1f"),
+                    "ST": st.column_config.NumberColumn("Top Çalma", format="%.1f"),
+                    "3PTM": st.column_config.NumberColumn("3 Sayı", format="%.1f"),
                 },
                 use_container_width=True
             )
         with tab2:
             my_team = df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             st.dataframe(
-                my_team[['Player', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'PTS', 'REB', 'AST', 'ST', 'BLK', '3PTM']], 
+                my_team[show_cols + ['REB', 'BLK', 'TO', 'FG%']], # Kadrom sekmesinde diğerlerini de gösterelim
+                column_config={
+                    "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=my_team['Skor'].max()),
+                    "FT%": st.column_config.NumberColumn("FT%", format="%.1%"),
+                    "FG%": st.column_config.NumberColumn("FG%", format="%.1%"),
+                },
                 use_container_width=True
             )
         with tab3:
