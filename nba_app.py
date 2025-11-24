@@ -6,26 +6,60 @@ import numpy as np
 import os
 import json
 
+# --- NBA API EKLEMESİ ---
+# NBA'den gerçek maç ve dakika verilerini çekmek için
+from nba_api.stats.endpoints import leaguedashplayerstats
+
 # --- AYARLAR ---
 SEASON_YEAR = 2025
+# NBA API Sezon Formatı (2025-26 Sezonu için)
+NBA_SEASON_STRING = '2025-26' 
+
 TARGET_LEAGUE_ID = "61142" 
 MY_TEAM_NAME = "Burak's Wizards"
-# Tekrar çalışan moda döndük, ama bu sefer hata vermeyecek şekilde ayarladık
 ANALYSIS_TYPE = 'average_season' 
 
 st.set_page_config(page_title="Burak's GM Dashboard", layout="wide")
 
+# --- YAN PANEL ---
 with st.sidebar:
     st.header("Yönetim")
-    if st.button("🔄 Yenile"):
+    if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
-    st.info("Mod: Ortalamalar + Debug")
+    st.info("Veri Kaynağı: Yahoo (Puanlar) + NBA.com (Dakika/Maç)")
 
+# --- NBA VERİSİNİ ÇEKEN FONKSİYON ---
+@st.cache_data(ttl=3600)
+def get_nba_real_stats():
+    """NBA.com'dan tüm oyuncuların gerçek GP ve MPG verilerini çeker"""
+    try:
+        # Tüm ligin istatistiklerini tek seferde çekiyoruz (Hızlı olması için)
+        stats = leaguedashplayerstats.LeagueDashPlayerStats(season=NBA_SEASON_STRING, per_mode_detailed='PerGame')
+        df = stats.get_data_frames()[0]
+        
+        # Bize sadece İsim, GP (Maç) ve MIN (Dakika) lazım
+        # İsimleri standartlaştıralım (Büyük/küçük harf sorunu olmasın diye)
+        nba_data = {}
+        for index, row in df.iterrows():
+            # Oyuncu ismini temizle
+            clean_name = row['PLAYER_NAME'].lower().replace('.', '').strip()
+            nba_data[clean_name] = {
+                'GP': row['GP'],
+                'MPG': row['MIN'] # NBA API dakika ortalamasını verir
+            }
+        return nba_data
+    except Exception as e:
+        st.warning(f"NBA verileri çekilemedi: {e}")
+        return {}
+
+# --- YAHOO VERİ YÜKLEME ---
 @st.cache_data(ttl=3600)
 def load_data():
-    debug_container = st.expander("🛠️ Geliştirici / Debug Paneli (Bana Buranın Fotosunu At)", expanded=True)
+    # Önce NBA Verilerini Hazırla
+    nba_stats_dict = get_nba_real_stats()
     
+    # Secrets Kontrolü
     if not os.path.exists('oauth2.json'):
         if 'yahoo_auth' in st.secrets:
             try:
@@ -35,9 +69,10 @@ def load_data():
                 with open('oauth2.json', 'w') as f:
                     json.dump(secrets_dict, f)
             except:
+                st.error("Secrets hatası.")
                 return None
         else:
-            st.error("Secrets yok!")
+            st.error("Secrets bulunamadı.")
             return None
 
     try:
@@ -62,13 +97,11 @@ def load_data():
         all_data = []
         teams = lg.teams()
         
-        # --- DEBUG İÇİN İLK VERİYİ YAKALA ---
-        first_data_captured = False
-        
         total_steps = len(teams) + 1
-        progress_bar = st.progress(0, text="Veriler çekiliyor...")
+        progress_bar = st.progress(0, text="Lig taranıyor...")
         step = 0
 
+        # 1. TAKIMLARI TARA
         for team_key in teams.keys():
             t_name = teams[team_key]['name']
             try:
@@ -77,36 +110,30 @@ def load_data():
                 
                 if p_ids:
                     stats = lg.player_stats(p_ids, ANALYSIS_TYPE)
-                    
-                    # --- DEBUG: İLK OYUNCUNUN VERİSİNİ EKRANA BAS ---
-                    if not first_data_captured and stats:
-                        debug_container.write("👇 **Yahoo'dan Gelen Ham Veri Örneği (Bunu İncelememiz Lazım):**")
-                        debug_container.write(stats[0]) # İlk oyuncunun tüm verisini yaz
-                        first_data_captured = True
-                    # ------------------------------------------------
-                    
                     for player_meta, player_stat in zip(roster, stats):
-                        process_player_safe(player_meta, player_stat, t_name, "Sahipli", all_data)
+                        # NBA Sözlüğünü de fonksiyona gönderiyoruz
+                        process_player_final(player_meta, player_stat, t_name, "Sahipli", all_data, nba_stats_dict)
             except:
                 pass
             step += 1
-            progress_bar.progress(step/total_steps)
+            progress_bar.progress(step / total_steps)
 
-        # FA TARAMASI
+        # 2. FREE AGENT TARA
         try:
-            fa_players = lg.free_agents(None)[:40]
+            progress_bar.progress(0.95, text="🆓 Free Agent havuzu taranıyor...")
+            fa_players = lg.free_agents(None)[:50]
             fa_ids = [p['player_id'] for p in fa_players]
             if fa_ids:
                 fa_stats = lg.player_stats(fa_ids, ANALYSIS_TYPE)
                 for player_meta, player_stat in zip(fa_players, fa_stats):
-                    process_player_safe(player_meta, player_stat, "🆓 FREE AGENT", "Free Agent", all_data)
+                    process_player_final(player_meta, player_stat, "🆓 FREE AGENT", "Free Agent", all_data, nba_stats_dict)
         except:
             pass
 
         progress_bar.empty()
         
         if not all_data:
-            st.error("Veri listesi boş!")
+            st.error("Veri listesi boş.")
             return None
             
         return pd.DataFrame(all_data)
@@ -115,42 +142,50 @@ def load_data():
         st.error(f"Hata: {e}")
         return None
 
-def process_player_safe(meta, stat, team_name, ownership, data_list):
-    """Hata vermeden ne varsa onu çeken fonksiyon"""
+def process_player_final(meta, stat, team_name, ownership, data_list, nba_dict):
     try:
         def get_val(val):
             if val == '-' or val is None: return 0.0
             return float(val)
 
-        # GP ve MPG'yi güvenli çekmeye çalışalım
-        gp = 0
-        if 'GP' in stat and stat['GP'] != '-': gp = int(stat['GP'])
+        player_name = meta['name']
         
-        # MPG / MIN farklı isimlerle gelebilir
-        raw_mpg = stat.get('MPG', stat.get('MIN', '0'))
-        mpg = 0.0
-        try:
-            if raw_mpg and raw_mpg != '-':
-                s = str(raw_mpg)
-                if ":" in s:
-                    p = s.split(":")
-                    mpg = float(p[0]) + float(p[1])/60
-                else:
-                    mpg = float(s)
-        except:
-            mpg = 0.0
+        # --- NBA VERİSİ EŞLEŞTİRME ---
+        # Yahoo'daki ismi temizle (noktaları sil, küçült)
+        clean_name = player_name.lower().replace('.', '').strip()
+        
+        # NBA sözlüğünden bu ismi bulmaya çalış
+        real_gp = 0
+        real_mpg = 0.0
+        
+        if clean_name in nba_dict:
+            real_gp = nba_dict[clean_name]['GP']
+            real_mpg = nba_dict[clean_name]['MPG']
+        else:
+            # Tam eşleşme yoksa (İsim farklılığı varsa) basit Yahoo verisine dön
+            # Ama senin ligde Yahoo bu veriyi vermiyor, o yüzden 0 kalır.
+            pass
+        # -----------------------------
 
-        # SAKATLIK
-        status = meta.get('status', '')
-        inj_display = f"⚠️ {status}" if status else "✅ Sağlam"
+        # Sakatlık
+        status_code = meta.get('status', '')
+        if status_code in ['INJ', 'O']: injury_display = f"🟥 {status_code}"
+        elif status_code in ['GTD', 'DTD']: injury_display = f"Rx {status_code}"
+        else: injury_display = "✅"
+
+        position = meta.get('display_position', '-')
 
         row = {
-            'Player': meta['name'],
+            'Player': player_name,
             'Team': team_name,
             'Owner_Status': ownership,
-            'Injury': inj_display,
-            'GP': gp,
-            'MPG': round(mpg, 1),
+            'Pos': position,
+            'Health': injury_display,
+            
+            # BURAYA DİKKAT: Artık gerçek NBA verisi kullanıyoruz
+            'GP': int(real_gp),
+            'MPG': float(real_mpg),
+            
             'FG%': get_val(stat.get('FG%')),
             'FT%': get_val(stat.get('FT%')),
             '3PTM': get_val(stat.get('3PTM')),
@@ -165,7 +200,7 @@ def process_player_safe(meta, stat, team_name, ownership, data_list):
     except:
         pass
 
-# ... (Buradan aşağısı aynı Z-Score ve Arayüz kodları) ...
+# --- ANALİZ ---
 def calculate_z_scores(df):
     cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
     if df.empty: return df
@@ -198,6 +233,7 @@ def score_players(df, targets):
             df['Skor'] += df[f'z_{cat}'] * w
     return df
 
+# --- ARAYÜZ ---
 st.title("🏀 Burak's GM Dashboard")
 st.markdown("---")
 
@@ -210,31 +246,39 @@ if df is not None and not df.empty:
     if targets:
         df = score_players(df, targets)
         col1, col2 = st.columns(2)
-        col1.error(f"Eksikler: {', '.join(targets)}")
-        col2.success(f"Güçler: {', '.join(strengths)}")
+        col1.error(f"📉 İhtiyaçlar: {', '.join(targets)}")
+        col2.success(f"📈 Güçlü Yanlar: {', '.join(strengths)}")
         
         st.markdown("---")
         
-        col_f1, col_f2 = st.columns(2)
-        status_filter = col_f1.multiselect("Tip", ["Sahipli", "Free Agent"], default=["Sahipli", "Free Agent"])
-        hide_inj = col_f2.checkbox("Sakatları Gizle", value=False)
+        c1, c2 = st.columns(2)
+        f_status = c1.multiselect("Filtre:", ["Sahipli", "Free Agent"], default=["Sahipli", "Free Agent"])
+        hide_inj = c2.checkbox("Sadece Sağlamlar (✅)", value=False)
         
-        filt_df = df[df['Owner_Status'].isin(status_filter)]
-        if hide_inj:
-            filt_df = filt_df[filt_df['Injury'].str.contains("Sağlam")]
+        view_df = df.copy()
+        if f_status: view_df = view_df[view_df['Owner_Status'].isin(f_status)]
+        if hide_inj: view_df = view_df[view_df['Health'].str.contains("✅")]
 
         tab1, tab2, tab3 = st.tabs(["🔥 Hedefler", "📋 Kadrom", "🌍 Tüm Liste"])
         
         with tab1:
-            trade_df = filt_df[filt_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
+            trade_df = view_df[view_df['Team'] != MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
             st.dataframe(
-                trade_df[['Player', 'Team', 'Injury', 'GP', 'MPG', 'Skor'] + targets].head(30),
-                column_config={"Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=trade_df['Skor'].max())},
+                trade_df[['Player', 'Team', 'Pos', 'Health', 'GP', 'MPG', 'Skor'] + targets].head(30),
+                column_config={
+                    "Skor": st.column_config.ProgressColumn("Uygunluk", format="%.1f", max_value=trade_df['Skor'].max()),
+                    "GP": st.column_config.NumberColumn("Maç"),
+                    "MPG": st.column_config.NumberColumn("Dakika", format="%.1f")
+                },
                 use_container_width=True
             )
         with tab2:
-            st.dataframe(df[df['Team']==MY_TEAM_NAME].sort_values(by='Skor', ascending=False), use_container_width=True)
+            my_team = df[df['Team'] == MY_TEAM_NAME].sort_values(by='Skor', ascending=False)
+            st.dataframe(
+                my_team[['Player', 'Pos', 'Health', 'GP', 'MPG', 'Skor', 'PTS', 'REB', 'AST', 'ST', 'BLK', '3PTM']], 
+                use_container_width=True
+            )
         with tab3:
-            st.dataframe(filt_df)
+            st.dataframe(view_df)
 else:
-    st.warning("Veri bekleniyor...")
+    st.info("Veriler yükleniyor...")
