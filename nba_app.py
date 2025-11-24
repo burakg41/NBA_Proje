@@ -45,26 +45,26 @@ with st.sidebar:
     )
 
 # ==========================================
-# 1. YAHOO AUTH HELPER (ÖNEMLİ FIX)
+# 1. YAHOO AUTH HELPER (BASİT ve SAĞLAM)
 # ==========================================
 
 
 def build_yahoo_oauth():
     """
-    oauth2.json + st.secrets['yahoo_auth'] kombinasyonunu daha toleranslı yönetir.
+    Yahoo OAuth bağlantısını kurar.
 
-    Desteklenen senaryolar:
-    1) oauth2.json zaten var ve içinde access_token dahil her şey var -> direkt kullan
-    2) secrets içinde tam token seti var (access_token, refresh_token, token_time vs.) -> dosyaya yaz ve kullan
-    3) secrets içinde sadece consumer_key / consumer_secret var -> quickstart senaryosu (ilk kez login)
+    STRATEJİ:
+    1) Eğer geçerli bir oauth2.json varsa → doğrudan kullan.
+    2) Yoksa, st.secrets['yahoo_auth'] içinden SADECE consumer_key / consumer_secret al,
+       yeni bir oauth2.json oluştur ve OAuth2 akışını başlat.
     """
 
     # 1) Varolan dosyayı kullanmayı dene
     if os.path.exists("oauth2.json"):
         try:
             return OAuth2(None, None, from_file="oauth2.json")
-        except KeyError:
-            # Dosya bozuk / eksik -> silip sıfırdan dene
+        except Exception:
+            # Dosya bozuk / eksik → silip sıfırdan dene
             try:
                 os.remove("oauth2.json")
             except OSError:
@@ -74,65 +74,48 @@ def build_yahoo_oauth():
     if "yahoo_auth" not in st.secrets:
         st.error(
             "Yahoo OAuth bilgileri bulunamadı.\n\n"
-            "Streamlit secrets'e `[yahoo_auth]` bölümünde en az "
-            "`consumer_key` ve `consumer_secret` eklemen gerekiyor."
+            "Lütfen Streamlit secrets'e `[yahoo_auth]` bölümünde en az "
+            "`consumer_key` ve `consumer_secret` ekle."
         )
         return None
 
     s = dict(st.secrets["yahoo_auth"])
 
-    # token_time string geldiyse floata çevirelim (varsayımsal)
-    if "token_time" in s:
-        try:
-            s["token_time"] = float(s["token_time"])
-        except Exception:
-            pass
+    # 2a) consumer_key ve consumer_secret var mı?
+    if "consumer_key" not in s or "consumer_secret" not in s:
+        st.error(
+            "st.secrets['yahoo_auth'] içinde 'consumer_key' ve/veya "
+            "'consumer_secret' eksik.\n\n"
+            "Örnek yapı:\n\n"
+            "[yahoo_auth]\n"
+            "consumer_key = \"...\"\n"
+            "consumer_secret = \"...\""
+        )
+        return None
 
-    # 2a) Secrets içinde zaten access_token varsa → tam oauth2.json gibi davran
-    if "access_token" in s:
-        try:
-            with open("oauth2.json", "w") as f:
-                json.dump(s, f)
-            return OAuth2(None, None, from_file="oauth2.json")
-        except Exception as e:
-            st.error(f"Yahoo OAuth dosyası yazılırken hata oluştu: {e}")
-            return None
+    # 2b) Her zaman SADECE ck/cs içeren yeni bir oauth2.json yarat
+    creds = {
+        "consumer_key": s["consumer_key"],
+        "consumer_secret": s["consumer_secret"],
+    }
+    try:
+        with open("oauth2.json", "w") as f:
+            json.dump(creds, f)
+    except Exception as e:
+        st.error(f"oauth2.json yazılırken hata oluştu: {e}")
+        return None
 
-    # 2b) Sadece consumer_key / consumer_secret varsa → Quickstart senaryosu
-    if "consumer_key" in s and "consumer_secret" in s:
-        try:
-            # Quickstart: önce sadece ck/cs içeren bir json dosyası oluştur
-            creds = {
-                "consumer_key": s["consumer_key"],
-                "consumer_secret": s["consumer_secret"],
-            }
-            with open("oauth2.json", "w") as f:
-                json.dump(creds, f)
-
-            # Bu adımda yahoo_oauth ilk kez çalışırken tarayıcıda yetki isteyebilir
-            oauth = OAuth2(None, None, from_file="oauth2.json")
-            return oauth
-
-        except KeyError as e:
-            st.error(
-                f"Yahoo OAuth yapılandırmasında eksik anahtar var: {e}\n"
-                "Lütfen `consumer_key` ve `consumer_secret` değerlerini kontrol et."
-            )
-            return None
-        except Exception as e:
-            st.error(f"Yahoo OAuth başlatılırken hata oluştu: {e}")
-            return None
-
-    # 2c) Buraya düştüyse secrets formatı yanlış
-    st.error(
-        "st.secrets['yahoo_auth'] formatı hatalı.\n\n"
-        "Geçerli örnek:\n\n"
-        "[yahoo_auth]\n"
-        "consumer_key = \"...\"\n"
-        "consumer_secret = \"...\"\n"
-        "# (İstersen access_token, refresh_token, token_time vs. de ekleyebilirsin)"
-    )
-    return None
+    # 2c) İlk kez OAuth akışını başlat
+    try:
+        oauth = OAuth2(None, None, from_file="oauth2.json")
+        return oauth
+    except Exception as e:
+        st.error(
+            "Yahoo OAuth başlatılırken hata oluştu.\n"
+            f"Ayrıntı: {e}\n\n"
+            "Consumer key/secret değerlerini ve Yahoo app izinlerini kontrol et."
+        )
+        return None
 
 
 # ==========================================
@@ -148,7 +131,9 @@ def fetch_nba_schedule():
         # Sadece önümüzdeki 7 güne bakıyoruz, paralel yapmaya gerek yok, hızlıdır.
         for i in range(7):
             date_str = (today + timedelta(days=i)).strftime("%m/%d/%Y")
-            board = scoreboardv2.ScoreboardV2(game_date=date_str, timeout=2)  # Timeout ekledik
+            board = scoreboardv2.ScoreboardV2(
+                game_date=date_str, timeout=2
+            )  # Timeout ekledik
             line_score = board.line_score.get_data_frame()
             if not line_score.empty:
                 playing_teams = line_score["TEAM_ABBREVIATION"].unique()
@@ -264,7 +249,7 @@ def master_data_loader():
             st.toast("⚡ Veriler diskten yüklendi (Turbo Mod)", icon="🚀")
             try:
                 with open(CACHE_FILE, "r") as f:
-                    return pd.DataFrame(json.load(f)), None  # Lig objesi diskten dönmez, gerekirse tekrar bağlanırız
+                    return pd.DataFrame(json.load(f)), None  # Lig objesi diskten dönmez
             except Exception:
                 pass  # Hata varsa API'ye geç
 
@@ -325,8 +310,8 @@ def master_data_loader():
             # FA Verilerini Çek (Chunked)
             chunk_size = 25
             for i in range(0, len(fa_ids), chunk_size):
-                chunk_ids = fa_ids[i : i + chunk_size]
-                chunk_players = fa_players[i : i + chunk_size]
+                chunk_ids = fa_ids[i: i + chunk_size]
+                chunk_players = fa_players[i: i + chunk_size]
                 chunk_data = fetch_fa_chunk(chunk_ids, chunk_players, lg)
                 if chunk_data:
                     all_raw_data.extend(chunk_data)
@@ -418,7 +403,7 @@ def master_data_loader():
 
 
 # ==========================================
-# 3. HESAPLAMA MOTORU (CACHED OLMALI)
+# 3. HESAPLAMA MOTORU
 # ==========================================
 
 
@@ -528,9 +513,6 @@ def trade_engine_optimized(df, my_team):
             for _, o in opp_assets.head(5).iterrows():
                 diff = tot_give_q - o["Genel_Kalite"]
                 gain = o["Skor"] - tot_give_s
-                # Süperstar almak için değerinden fazla vermeye (overpay) razıyız (diff > -5)
-                # Ama aldığımız oyuncunun skoru bize çok şey katmalı (Çünkü 1 slot açıyoruz)
-                # Not: Slot açmak +Skor demektir (FA'dan adam alırsın). O yüzden gain düşük bile olsa kardır.
                 if diff > -4.0 and gain > -5.0:
                     proposals.append(
                         {
