@@ -38,7 +38,7 @@ ANALYSIS_TYPE_AVG = 'average_season'
 ANALYSIS_TYPE_TOTAL = 'season'
 NBA_SEASON_STRING = "2025-26"
 
-DATA_VERSION = "v24_week_with_yahoo_totals"
+DATA_VERSION = "v24_week_with_yahoo_totals_teamid"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -53,7 +53,7 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# HELPER: İSİM NORMALİZASYONU
+# HELPER: İSİM / TAKIM NORMALİZASYONU
 # ==========================================
 def normalize_name(name: str) -> str:
     if not name:
@@ -545,7 +545,7 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
 # ==========================================
 # YAHOO HAFTALIK GERÇEKLEŞEN TOPLAM İSTATİSTİKLER
 # ==========================================
-def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week: int | None = None):
+def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
     """
     Yahoo Fantasy'den o haftanın gerçekleşmiş matchup istatistiklerini çeker.
     Takımları isimle değil, team_id ile eşleştirir.
@@ -580,13 +580,11 @@ def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week
         name_to_id = {}
         for _, info in league_teams.items():
             nm = normalize_team_name(info.get("name"))
-            # team_id doğrudan varsa onu, yoksa team_key'den çek
             tid = info.get("team_id")
             if tid is None:
                 tkey = info.get("team_key", "")
-                # team_key: "123.l.4567.t.9" gibi -> son kısım team id
-                if ".t." in tkey:
-                    tid = tkey.split(".t.")[-1]
+                if ".t." in str(tkey):
+                    tid = str(tkey).split(".t.")[-1]
             if tid is not None:
                 name_to_id[nm] = str(tid)
 
@@ -681,84 +679,6 @@ def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week
         # Buraya gelindiyse ilgili iki takımı içeren matchup bulunamadı
         return None
 
-    except Exception as e:
-        print("weekly totals error:", e)
-        return None
-
-
-        # Stat ID -> display name map
-        cats_meta = lg.stat_categories()
-        stat_map = {}
-        for st_meta in cats_meta.get('stats', []):
-            sid = str(st_meta.get('stat_id'))
-            dname = st_meta.get('display_name') or st_meta.get('name')
-            stat_map[sid] = dname
-
-        desired_labels = {'FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'}
-
-        def extract_team_name(tdict):
-            return (tdict.get('name') or
-                    tdict.get('team_name') or
-                    tdict.get('nickname') or
-                    str(tdict.get('team_id')))
-
-        def extract_stats(tdict):
-            s_container = tdict.get('team_stats') or tdict.get('stats') or {}
-            if isinstance(s_container, dict):
-                stats_list = s_container.get('stats', [])
-            else:
-                stats_list = s_container
-            result = {}
-            if not isinstance(stats_list, list):
-                return result
-            for st in stats_list:
-                sid = str(st.get('stat_id'))
-                val = st.get('value')
-                label = stat_map.get(sid)
-                if label in desired_labels:
-                    result[label] = val
-            return result
-
-        my_norm = normalize_team_name(my_team_name)
-        opp_norm = normalize_team_name(opp_team_name)
-
-        matchups = lg.matchups(week)
-
-        for mu in matchups:
-            teams_obj = mu.get('teams') or mu.get('team')
-            if isinstance(teams_obj, dict) and 'team' in teams_obj:
-                tlist = teams_obj['team']
-            else:
-                tlist = teams_obj
-
-            if not isinstance(tlist, list) or len(tlist) != 2:
-                continue
-
-            t_a, t_b = tlist[0], tlist[1]
-            name_a = normalize_team_name(extract_team_name(t_a))
-            name_b = normalize_team_name(extract_team_name(t_b))
-
-            if {name_a, name_b} != {my_norm, opp_norm}:
-                continue
-
-            # Bu bizim haftalık matchup’ımız
-            if name_a == my_norm:
-                my_t, opp_t = t_a, t_b
-                my_name_final, opp_name_final = name_a, name_b
-            else:
-                my_t, opp_t = t_b, t_a
-                my_name_final, opp_name_final = name_b, name_a
-
-            my_stats = extract_stats(my_t)
-            opp_stats = extract_stats(opp_t)
-
-            return {
-                'week': week,
-                'my':  {'team_name': my_name_final,  'stats': my_stats},
-                'opp': {'team_name': opp_name_final, 'stats': opp_stats}
-            }
-
-        return None
     except Exception as e:
         print("weekly totals error:", e)
         return None
@@ -1198,7 +1118,7 @@ if df is not None and not df.empty:
                 weekly_totals = get_weekly_totals_from_yahoo(lg, MY_TEAM_NAME, op_a)
 
                 if weekly_totals is None:
-                    st.info("Bu hafta için Yahoo canlı toplamları alınamadı (matchups() veya stat eşleşmesi bulunamadı).")
+                    st.info("Bu hafta için Yahoo canlı toplamları alınamadı (matchups() veya stat/ID eşleşmesi bulunamadı).")
                 else:
                     des_cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
                     my_stats = weekly_totals['my']['stats']
@@ -1219,4 +1139,3 @@ if df is not None and not df.empty:
                     )
                     yahoo_df = pd.DataFrame(table_rows)
                     st.dataframe(yahoo_df, use_container_width=True, hide_index=True)
-
