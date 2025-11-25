@@ -39,7 +39,7 @@ ANALYSIS_TYPE_TOTAL = 'season'
 NBA_SEASON_STRING = "2025-26"
 
 # Cache ve hafta senkronu için versiyon
-DATA_VERSION = "v21_full_week_sync"
+DATA_VERSION = "v22_week_sync_fix"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -106,9 +106,10 @@ def get_schedule_espn_by_day(start_date_str: str, num_days: int = 7):
             key_api = date_obj.strftime('%Y%m%d')
             result[key_day] = {}
             u = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={key_api}"
-            r = requests.get(u, headers=headers, timeout=2)
+            r = requests.get(u, headers=headers, timeout=3)
             if r.status_code == 200:
-                for e in r.json().get('events', []):
+                data = r.json()
+                for e in data.get('events', []):
                     for c in e.get('competitions', []):
                         for comp in c.get('competitors', []):
                             abbr = TEAM_MAPPER.get(comp['team']['abbreviation'], comp['team']['abbreviation'])
@@ -116,7 +117,7 @@ def get_schedule_espn_by_day(start_date_str: str, num_days: int = 7):
             time.sleep(0.05)
         return result
     except Exception:
-        # ESPN çökerse: tahmini yerine boş dön (0 maç)
+        # ESPN çökerse: tam boş sözlük dön (fallback'i başka yerde yapacağız)
         return {}
 
 @st.cache_data(ttl=900)
@@ -124,12 +125,19 @@ def get_team_games_for_window(start_date_str: str, num_days: int = 7):
     """
     Belirli bir hafta penceresi için takım bazlı toplam maç sayısı.
     Games_Next_7D = bu pencere içindeki toplam maç sayısı.
+    ESPN hiçbir maç dönmezse -> tüm takımlara 3 maçlık fallback (tamamen 0 kalmasın).
     """
     sched = get_schedule_espn_by_day(start_date_str, num_days)
     team_counts = {abbr: 0 for abbr in TEAM_MAPPER.values()}
-    for day, day_data in sched.items():
+    for day_data in sched.values():
         for abbr, cnt in day_data.items():
             team_counts[abbr] = team_counts.get(abbr, 0) + cnt
+    
+    total_games = sum(team_counts.values())
+    if total_games == 0:
+        # Fallback: lig geneline 3 maçlık haftalık yük ver (tahmini)
+        for abbr in team_counts.keys():
+            team_counts[abbr] = 3
     return team_counts
 
 @st.cache_data(ttl=3600)
@@ -543,7 +551,7 @@ def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: dat
     - Günlük maç sayısı
     - Günlük & haftalık tahmini FP ve temel kategoriler
     🔴 Sakat oyuncular hariç.
-    ESPN boşsa (hiç maç yoksa) Games_Next_7D fallback'i de sıfır (aynı pencere).
+    ESPN boşsa -> aynı penceredeki Games_Next_7D üzerinden fallback.
     """
     proj_cats = ['3PTM','PTS','REB','AST','ST','BLK','TO']
 
@@ -594,7 +602,7 @@ def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: dat
 
     week_games = sum(r['Maç_Sayısı_Sen'] for r in daily_rows)
 
-    # 2) Eğer ESPN verisi 0 maç döndürdüyse, Games_Next_7D fallback (ama bu da aynı pencere ve 0 olabilir)
+    # 2) Eğer ESPN verisi 0 maç döndürdüyse, Games_Next_7D fallback
     if week_games == 0:
         if 'Games_Next_7D' not in active.columns:
             weekly = {
@@ -664,8 +672,9 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    # 🔗 Tüm app için ortak hafta penceresi (Week 6 default: 24 Kasım)
-    default_start = datetime(2025, 11, 24).date()
+    # 🔗 Tüm app için ortak hafta penceresi (otomatik: bu haftanın pazartesi günü)
+    today = datetime.now().date()
+    default_start = today - timedelta(days=today.weekday())  # Pazartesi
     week_start = st.date_input("Hafta başlangıç tarihi (Yahoo Week ile senkron)", value=default_start)
     num_days = st.number_input("Hafta uzunluğu (gün)", min_value=5, max_value=10, value=7, step=1)
     week_start_str = week_start.isoformat()
@@ -791,7 +800,7 @@ if df is not None and not df.empty:
     # -------------------------- Rakip Analizi --------------------------
     with t3:
         st.subheader("Rakip Karşılaştırma – Sezon, Haftalık Projeksiyon ve Eşleşme Analizi")
-        st.caption(f"Hafta penceresi: {week_start.strftime('%d.%m.%Y')} + {num_days_int} gün (Yahoo Week ile senkron).")
+        st.caption(f"Hafta penceresi: {week_start.strftime('%d.%m.%Y')} + {num_days_int} gün.")
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op_a = st.selectbox("Rakip Takım Seç", ops)
         
@@ -877,7 +886,7 @@ if df is not None and not df.empty:
 
             # ---- Haftalık Eşleşme Analizi ----
             with tab_matchup:
-                st.caption("Bu sekmede, seçtiğin rakibe karşı **sidebar’da seçtiğin hafta penceresi** için maç sayıları ve tahmini üretim hesaplanır; 🔴 Sakat oyuncular hariç.")
+                st.caption("Bu sekmede, seçtiğin rakibe karşı **sidebar’da seçtiğin hafta penceresi** için maç sayıları ve tahmini üretim hesaplanır; 🔴 Sakat oyuncular hariç. ESPN veri vermezse Games_Next_7D fallback’i kullanılır.")
 
                 sched_by_day = get_schedule_espn_by_day(week_start_str, num_days_int)
 
