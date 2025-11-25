@@ -37,12 +37,10 @@ MY_TEAM_NAME = "Burak's Wizards"
 ANALYSIS_TYPE_AVG = 'average_season' 
 ANALYSIS_TYPE_TOTAL = 'season'
 
-# NBA sezon stringi (nba_api için)
 NBA_SEASON_STRING = "2025-26"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
-# Takım Eşleştirme
 TEAM_MAPPER = {
     'ATL': 'ATL', 'BOS': 'BOS', 'BKN': 'BKN', 'CHA': 'CHA', 'CHI': 'CHI',
     'CLE': 'CLE', 'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GS': 'GSW', 'GSW': 'GSW',
@@ -54,7 +52,7 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# HELPER: İSİM NORMALİZASYONU (NBA <-> YAHOO)
+# HELPER: İSİM NORMALİZASYONU
 # ==========================================
 def normalize_name(name: str) -> str:
     if not name:
@@ -69,11 +67,9 @@ def normalize_name(name: str) -> str:
     return n
 
 # ==========================================
-# 1. AUTH & VERİ ÇEKME
+# AUTH & SCHEDULE
 # ==========================================
-
 def authenticate_direct():
-    """Manuel Token ile Giriş"""
     if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
         st.error("🚨 Token hatası!")
         st.stop()
@@ -93,7 +89,6 @@ def authenticate_direct():
 
 @st.cache_data(ttl=3600)
 def get_schedule_espn():
-    """ESPN API (Fikstür)"""
     counts = {}
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -114,12 +109,8 @@ def get_schedule_espn():
 
 @st.cache_data(ttl=3600)
 def get_nba_base_stats():
-    """
-    NBA resmi istatistiklerinden GP & MPG (MIN) çek.
-    PerGame modunda: GP, MIN sütunları var.
-    """
     if leaguedashplayerstats is None:
-        print("nba_api yüklü değil, NBA base stats alınamıyor.")
+        print("nba_api yüklü değil.")
         return None
     try:
         resp = leaguedashplayerstats.LeagueDashPlayerStats(
@@ -134,8 +125,10 @@ def get_nba_base_stats():
         print("nba_api error:", e)
         return None
 
+# ==========================================
+# PLAYER PROCESS
+# ==========================================
 def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nba_df):
-    """Tek oyuncuyu işler, pozisyon / GP / MPG / Trend sınıflandırması burada."""
     try:
         def v(x): 
             if x in ['-', None]:
@@ -159,7 +152,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
 
         name = meta['name']
         
-        # --- POZİSYON ---
+        # Pozisyon
         raw_pos = meta.get('display_position') or meta.get('eligible_positions') or ''
         if isinstance(raw_pos, list):
             pos_list = [str(p).strip() for p in raw_pos if p]
@@ -173,7 +166,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         else:
             final_pos = "/".join(pos_list[:2])
 
-        # --- GP & MPG (Önce Yahoo, sonra NBA override) ---
+        # GP & MPG (Yahoo + NBA override)
         gp = v(
             s_total.get('GP')
             or s_total.get('G')
@@ -209,12 +202,12 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
                     gp = int(gp_n)
                     mpg = float(mpg_n)
 
-        # Takım & Fikstür
+        # Takım & fikstür
         y_abbr = meta.get('editorial_team_abbr','').upper()
         team = TEAM_MAPPER.get(y_abbr, y_abbr)
         g7 = n_sched.get(team, 3) 
         
-        # --- SKOR (Verimlilik Puanı) ---
+        # Skor (fantasy verim puanı)
         def calc_fp(stats):
             return (
                 v(stats.get('PTS')) +
@@ -228,24 +221,29 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         score_season = calc_fp(s_avg)
         score_month = calc_fp(s_m)
         
-        # --- FORM DURUMU (YENİ MANTIK) ---
+        # Sağlık
         st_c = meta.get('status','')
-        inj = "🔴 Sakat" if st_c in ['INJ', 'O'] else ("🟠 Riskli" if st_c in ['GTD','DTD'] else "🟢 Sağlıklı")
+        if st_c in ['INJ', 'O']:
+            inj = "🔴 Sakat"
+        elif st_c in ['GTD','DTD']:
+            inj = "🟠 Riskli"
+        else:
+            inj = "🟢 Sağlıklı"
 
-        # Önce sakat / verisiz
+        # Form (yeni, daha zor eşikler)
         if "🔴" in inj:
             trend = "🔴 Sakat"
         else:
             if gp < 5 or score_season < 5:
                 trend = "⚪ Verisiz"
             else:
-                # 1) Aşırı formda
-                if mpg >= 30 and score_season >= 30:
+                # Aşırı formda (eşiği yükselttik)
+                if mpg >= 32 and score_season >= 32:
                     trend = "🟣 Aşırı Formda"
-                # 2) Formda
-                elif 25 <= mpg <= 30 and 26 <= score_season <= 30:
+                # Formda
+                elif 28 <= mpg < 32 and 26 <= score_season < 32:
                     trend = "🟢 Formda"
-                # 3) Yükselişte
+                # Yükselişte
                 elif mpg > 18 and score_season > 20:
                     trend = "🟡 Yükselişte"
                 else:
@@ -377,7 +375,7 @@ def load_data():
         return None, None
 
 # ==========================================
-# ANALİZ
+# ANALİZ (Z-SCORE, TAKAS)
 # ==========================================
 def get_z_and_trade_val(df, punt):
     cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
@@ -393,9 +391,9 @@ def get_z_and_trade_val(df, punt):
         z = (df[c] - m) / (s if s != 0 else 1)
         df[f'z_{c}'] = -z if c == 'TO' else z
         
-    df['Trade_Value'] = df[[f'z_{c}' for c in act]].sum(axis=1)
-    mask = df['Health'].str.contains('🔴|🟠')
-    df.loc[mask, 'Trade_Value'] *= 0.5
+    df['Uygunluk_Puanı'] = df[[f'z_{c}' for c in act]].sum(axis=1)
+    mask = df['Health'].astype(str).str.contains('🔴|🟠')
+    df.loc[mask, 'Uygunluk_Puanı'] *= 0.5
     
     return df, act
 
@@ -408,15 +406,13 @@ def analyze_needs(df, my_team, act):
     return [x.replace('z_','') for x in tot.head(3).index], [x.replace('z_','') for x in tot.tail(3).index]
 
 def analyze_trade_scenario(give, recv, my_needs):
-    # Toplam trade değerleri
-    val_give = sum([p['Trade_Value'] for p in give])
-    val_recv = sum([p['Trade_Value'] for p in recv])
+    val_give = sum([p['Uygunluk_Puanı'] for p in give])
+    val_recv = sum([p['Uygunluk_Puanı'] for p in recv])
     slot_adv = (len(give) - len(recv)) * 0.5
-    net_diff = val_recv - val_give + slot_adv  # takas sonrası senin kazanımın
+    net_diff = val_recv - val_give + slot_adv  # senin net kazancın
 
-    # Mantıklı aralıktaysa senaryo üret
     if net_diff > 0.5 and (val_give - val_recv) > -4.0:
-        # Kategori bazlı etki hesapla
+        # Kategori etkisi (z-score üzerinden)
         example = give[0]
         z_cols = [c for c in example.index if c.startswith('z_')]
         cat_impacts = []
@@ -427,27 +423,23 @@ def analyze_trade_scenario(give, recv, my_needs):
             delta = sum_recv - sum_give
             cat_impacts.append((cat, delta))
 
-        # Mutlak değeri en yüksek ilk 4 kategori
         cat_impacts.sort(key=lambda x: abs(x[1]), reverse=True)
         top_impacts = cat_impacts[:4]
         etkistr = ", ".join([f"{c}:{d:+.2f}" for c, d in top_impacts])
 
-        # İhtiyaç karşılanan kategoriler
+        # İhtiyaç kategorileri
         needs_met = list(set([
             c for p in recv for c in my_needs
             if p.get(f'z_{c}', 0) > 0.5
         ]))
         strategic_score = net_diff + (len(needs_met) * 1.2)
         
-        # Sakatlık uyarısı
         has_injured = any(["🔴" in p['Health'] or "🟠" in p['Health'] for p in recv])
         warn = "⚠️ RİSKLİ" if has_injured else "Temiz"
         
-        # Oyuncu stringleri
         g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
         r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
         
-        # Şans (kabul edilme ihtimali)
         ratio = val_give / val_recv if val_recv != 0 else 0
         if ratio < 0.6 or ratio > 1.4:
             acc = "⚪ Düşük"
@@ -463,7 +455,7 @@ def analyze_trade_scenario(give, recv, my_needs):
             'Senaryo': f"{len(give)}v{len(recv)}",
             'Verilecekler': g_str,
             'Alınacaklar': r_str,
-            'Puan': round(strategic_score, 1),
+            'Uygunluk_Puanı': round(strategic_score, 1),
             'Kategori_Etkisi': etkistr,
             'Durum': warn,
             'Şans': acc
@@ -473,11 +465,16 @@ def analyze_trade_scenario(give, recv, my_needs):
 def trade_engine_grouped(df, my_team, target_opp, my_needs):
     safe_me = my_team.strip()
     safe_opp = target_opp.strip()
-    my_roster = df[df['Team'].str.strip() == safe_me].sort_values(by='Trade_Value', ascending=True)
-    opp_roster = df[df['Team'].str.strip() == safe_opp].sort_values(by='Trade_Value', ascending=False)
+    my_roster = df[df['Team'].str.strip() == safe_me].sort_values(by='Uygunluk_Puanı', ascending=True)
+    opp_roster = df[df['Team'].str.strip() == safe_opp].sort_values(by='Uygunluk_Puanı', ascending=False)
     my_assets = my_roster.head(10)
     opp_assets = opp_roster.head(10)
-    groups = {"Küçük (1-2)": [], "Orta (2-3)": [], "Büyük (3-4)": [], "Devasa (4)": []}
+    groups = {
+        "Küçük Paket (1-2 Oyuncu)": [],
+        "Orta Paket (2-3 Oyuncu)": [],
+        "Büyük Paket (3-4 Oyuncu)": [],
+        "Devasa Paket (4+ Oyuncu)": []
+    }
     
     for ng in range(1, 5):
         for nr in range(1, 5):
@@ -485,13 +482,13 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
                 continue
             total_p = ng + nr
             if total_p <= 3:
-                g_name = "Küçük (1-2)"
+                g_name = "Küçük Paket (1-2 Oyuncu)"
             elif total_p <= 5:
-                g_name = "Orta (2-3)"
+                g_name = "Orta Paket (2-3 Oyuncu)"
             elif total_p <= 7:
-                g_name = "Büyük (3-4)"
+                g_name = "Büyük Paket (3-4 Oyuncu)"
             else:
-                g_name = "Devasa (4)"
+                g_name = "Devasa Paket (4+ Oyuncu)"
             
             my_combos = list(itertools.combinations(my_assets.index, ng))
             opp_combos = list(itertools.combinations(opp_assets.index, nr))
@@ -510,7 +507,7 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
     result_dfs = {}
     for g_name, data in groups.items():
         if data:
-            result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Puan', ascending=False)
+            result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Uygunluk_Puanı', ascending=False)
         else:
             result_dfs[g_name] = pd.DataFrame()
     return result_dfs
@@ -524,8 +521,8 @@ with st.sidebar:
     if st.button("Yenile"):
         st.cache_data.clear()
         st.rerun()
-    hide_inj = st.checkbox("Sakatları Gizle")
-    punt = st.multiselect("Punt", ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'])
+    hide_inj = st.checkbox("Sakatları gizle")
+    punt = st.multiselect("Punt Kategorileri", ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'])
 
 df, lg = load_data()
 
@@ -535,17 +532,22 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
-    v_df = df[~df['Health'].str.contains("🔴")] if hide_inj else df.copy()
+    if hide_inj:
+        inj_mask = df['Health'].astype(str).str.contains("🔴")
+        v_df = df[~inj_mask].copy()
+    else:
+        v_df = df.copy()
     
     c1, c2 = st.columns(2)
-    c1.error(f"Hedefler: {', '.join(weak)}")
-    c2.success(f"Güçlü: {', '.join(strong)}")
+    c1.error(f"Hedeflenmesi Gereken Kategoriler: {', '.join(weak)}")
+    c2.success(f"Güçlü Olduğun Kategoriler: {', '.join(strong)}")
     
-    t1, t2, t3 = st.tabs(["Kadro", "Takas", "Rakip"])
+    t1, t2, t3 = st.tabs(["Kadro Analizi", "Takas Sihirbazı", "Rakip Analizi"])
     
+    # -------------------------- Kadro --------------------------
     with t1:
         tm = st.selectbox(
-            "Takım",
+            "Takım Seç",
             [MY_TEAM_NAME] + sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME])
         )
         show = v_df[v_df['Team'] == tm].sort_values('Skor', ascending=False)
@@ -554,30 +556,51 @@ if df is not None and not df.empty:
                   'FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], 
             column_config={
                 "Skor": st.column_config.ProgressColumn(
-                    "Verim Puanı", format="%.1f", min_value=0, max_value=60
+                    "Verimlilik Puanı", format="%.1f", min_value=0, max_value=60
                 ),
-                "Trend": st.column_config.TextColumn("Form"),
+                "Trend": st.column_config.TextColumn("Form Durumu"),
                 "MPG": st.column_config.NumberColumn("Dakika", format="%.1f")
             },
             use_container_width=True, 
             hide_index=True
         )
-        
+    
+    # -------------------------- Takas Sihirbazı --------------------------
     with t2:
+        st.subheader("Takas Sihirbazı – Profesyonel Değerlendirme")
+        st.caption("Takas paketlerini, takım ihtiyaçlarını ve kategori etkilerini birlikte değerlendirir.")
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
-        op = st.selectbox("Hedef Takım", ops)
-        if st.button("Hesapla"):
+        op = st.selectbox("Hedef Takım Seç", ops)
+        if st.button("Takas Senaryolarını Hesapla"):
             res = trade_engine_grouped(df, MY_TEAM_NAME, op, weak)
             ts = st.tabs(list(res.keys()))
             for t_tab, (k, d) in zip(ts, res.items()):
                 with t_tab:
                     if not d.empty:
-                        st.dataframe(d.head(15), use_container_width=True, hide_index=True)
+                        st.dataframe(
+                            d[['Senaryo','Verilecekler','Alınacaklar',
+                               'Uygunluk_Puanı','Kategori_Etkisi','Durum','Şans']].head(20),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Uygunluk_Puanı": st.column_config.NumberColumn(
+                                    "Takıma Uygunluk Puanı", format="%.1f"
+                                ),
+                                "Kategori_Etkisi": st.column_config.TextColumn(
+                                    "Etkilenen Kategoriler (Δ z-score)"
+                                ),
+                                "Durum": st.column_config.TextColumn("Risk"),
+                                "Şans": st.column_config.TextColumn("Kabul Edilme Olasılığı")
+                            }
+                        )
                     else:
-                        st.info("Takas yok.")
-                    
+                        st.info("Bu paket tipinde mantıklı takas senaryosu bulunamadı.")
+    
+    # -------------------------- Rakip Analizi --------------------------
     with t3:
-        op_a = st.selectbox("Rakip Analiz", ops)
+        st.subheader("Rakip Karşılaştırma")
+        ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
+        op_a = st.selectbox("Rakip Takım Seç", ops)
         if op_a:
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
             m = df[df['Team'] == MY_TEAM_NAME][cats].mean()
@@ -591,11 +614,11 @@ if df is not None and not df.empty:
                 else:
                     so += 1
                 data.append({
-                    'Kat': c,
-                    'Ben': f"{m[c]:.1f}",
+                    'Kategori': c,
+                    'Sen': f"{m[c]:.1f}",
                     'Rakip': f"{o[c]:.1f}",
-                    'Durum': "✅" if w else "❌"
+                    'Durum': "✅ Üstünsün" if w else "❌ Geri"
                 })
             c1, c2 = st.columns(2)
-            c1.metric("Skor", f"{sm} - {so}")
+            c1.metric("Kategori Skoru", f"{sm} - {so}")
             st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
