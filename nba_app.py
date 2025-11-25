@@ -40,7 +40,7 @@ ANALYSIS_TYPE_TOTAL = 'season'
 NBA_SEASON_STRING = "2025-26"
 
 # Cache'i kırmak için versiyon anahtarı
-DATA_VERSION = "v16_trend_injury_fix"
+DATA_VERSION = "v17_trade_ui_weekly_proj"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -226,7 +226,6 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         
         # Sağlık - Yahoo status yakalama
         raw_status = str(meta.get('status', '') or '').upper()
-        # Tipik durumlar: 'O', 'GTD', 'DTD', 'IR', 'IL', 'IL+', 'NA', ''
         if raw_status in ['O', 'OUT', 'IR', 'IL', 'IL+', 'INJ']:
             inj = f"🔴 Sakat ({raw_status})"
         elif raw_status in ['GTD', 'DTD', 'NA', 'DAY_TO_DAY']:
@@ -574,57 +573,162 @@ if df is not None and not df.empty:
     # -------------------------- Takas Sihirbazı --------------------------
     with t2:
         st.subheader("Takas Sihirbazı – Profesyonel Değerlendirme")
-        st.caption("Takas paketlerini, takım ihtiyaçlarını ve kategori etkilerini birlikte değerlendirir.")
+        st.caption("Takas paketlerini, takım ihtiyaçlarını, kategori etkilerini ve sakatlık risklerini birlikte değerlendirir.")
+        
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
-        op = st.selectbox("Hedef Takım Seç", ops)
+        col_filters = st.columns(2)
+        with col_filters[0]:
+            op = st.selectbox("Hedef Takım Seç", ops)
+        with col_filters[1]:
+            min_score = st.slider("Minimum Uygunluk Puanı", 0.0, 25.0, 5.0, 0.5)
+        show_inj_trades = st.checkbox("Sakat oyuncu içeren senaryoları göster", value=False)
+        
         if st.button("Takas Senaryolarını Hesapla"):
             res = trade_engine_grouped(df, MY_TEAM_NAME, op, weak)
+            
+            # Global en iyi 5 senaryo (özet panel)
+            all_scenarios = []
+            for g_name, d in res.items():
+                if not d.empty:
+                    temp = d.copy()
+                    temp["Paket_Tipi"] = g_name
+                    all_scenarios.append(temp)
+            if all_scenarios:
+                all_scenarios = pd.concat(all_scenarios, ignore_index=True)
+                # Filtreler
+                all_scenarios_f = all_scenarios[
+                    all_scenarios["Uygunluk_Puanı"] >= min_score
+                ].copy()
+                if not show_inj_trades:
+                    all_scenarios_f = all_scenarios_f[all_scenarios_f["Durum"] != "⚠️ RİSKLİ"]
+                top5 = all_scenarios_f.sort_values(by="Uygunluk_Puanı", ascending=False).head(5)
+                
+                st.markdown("### 🔍 En Güçlü 5 Takas Senaryosu (Özet)")
+                if not top5.empty:
+                    st.dataframe(
+                        top5[["Paket_Tipi","Senaryo","Verilecekler","Alınacaklar",
+                              "Uygunluk_Puanı","Kategori_Etkisi","Durum","Şans"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info("Filtrelere uyan güçlü senaryo bulunamadı.")
+            
+            st.markdown("### 📦 Paket Tiplerine Göre Detaylı Senaryolar")
             ts = st.tabs(list(res.keys()))
             for t_tab, (k, d) in zip(ts, res.items()):
                 with t_tab:
                     if not d.empty:
-                        st.dataframe(
-                            d[['Senaryo','Verilecekler','Alınacaklar',
-                               'Uygunluk_Puanı','Kategori_Etkisi','Durum','Şans']].head(20),
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Uygunluk_Puanı": st.column_config.NumberColumn(
-                                    "Takıma Uygunluk Puanı", format="%.1f"
-                                ),
-                                "Kategori_Etkisi": st.column_config.TextColumn(
-                                    "Etkilenen Kategoriler (Δ z-score)"
-                                ),
-                                "Durum": st.column_config.TextColumn("Risk"),
-                                "Şans": st.column_config.TextColumn("Kabul Edilme Olasılığı")
-                            }
-                        )
+                        df_f = d[d["Uygunluk_Puanı"] >= min_score].copy()
+                        if not show_inj_trades:
+                            df_f = df_f[df_f["Durum"] != "⚠️ RİSKLİ"]
+                        if df_f.empty:
+                            st.info("Bu paket tipi için filtrelere uyan senaryo yok.")
+                        else:
+                            st.dataframe(
+                                df_f[['Senaryo','Verilecekler','Alınacaklar',
+                                      'Uygunluk_Puanı','Kategori_Etkisi','Durum','Şans']].head(20),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Uygunluk_Puanı": st.column_config.NumberColumn(
+                                        "Takıma Uygunluk Puanı", format="%.1f"
+                                    ),
+                                    "Kategori_Etkisi": st.column_config.TextColumn(
+                                        "Etkilenen Kategoriler (Δ z-score)"
+                                    ),
+                                    "Durum": st.column_config.TextColumn("Risk"),
+                                    "Şans": st.column_config.TextColumn("Kabul Edilme Olasılığı")
+                                }
+                            )
                     else:
                         st.info("Bu paket tipinde mantıklı takas senaryosu bulunamadı.")
     
     # -------------------------- Rakip Analizi --------------------------
     with t3:
-        st.subheader("Rakip Karşılaştırma")
+        st.subheader("Rakip Karşılaştırma – Sezon ve Haftalık Projeksiyon")
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op_a = st.selectbox("Rakip Takım Seç", ops)
+        
+        view_mode = st.radio(
+            "Görünüm",
+            ["Sezon Ortalamaları", "Haftalık Projeksiyon (Takvim + Sezon Ortalaması)"],
+            horizontal=True
+        )
+        
         if op_a:
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
-            m = df[df['Team'] == MY_TEAM_NAME][cats].mean()
-            o = df[df['Team'] == op_a][cats].mean()
-            data = []
-            sm, so = 0, 0
-            for c in cats:
-                w = (m[c] < o[c]) if c == 'TO' else (m[c] > o[c])
-                if w:
-                    sm += 1 
-                else:
-                    so += 1
-                data.append({
-                    'Kategori': c,
-                    'Sen': f"{m[c]:.1f}",
-                    'Rakip': f"{o[c]:.1f}",
-                    'Durum': "✅ Üstünsün" if w else "❌ Geri"
-                })
-            c1, c2 = st.columns(2)
-            c1.metric("Kategori Skoru", f"{sm} - {so}")
-            st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+            
+            my_team_df = df[df['Team'] == MY_TEAM_NAME].copy()
+            opp_team_df = df[df['Team'] == op_a].copy()
+            
+            # Sezon ortalamaları
+            my_season = my_team_df[cats].mean()
+            opp_season = opp_team_df[cats].mean()
+            
+            if view_mode == "Sezon Ortalamaları":
+                data = []
+                sm, so = 0, 0
+                for c in cats:
+                    w = (my_season[c] < opp_season[c]) if c == 'TO' else (my_season[c] > opp_season[c])
+                    if w:
+                        sm += 1 
+                    else:
+                        so += 1
+                    data.append({
+                        'Kategori': c,
+                        'Sen (Sezon)': f"{my_season[c]:.1f}",
+                        'Rakip (Sezon)': f"{opp_season[c]:.1f}",
+                        'Durum': "✅ Üstünsün" if w else "❌ Geri"
+                    })
+                c1, c2 = st.columns(2)
+                c1.metric("Kategori Skoru (Sezon)", f"{sm} - {so}")
+                st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+            
+            else:
+                # Haftalık projeksiyon: sayılabilir istatistikler için PPG * Games_Next_7D
+                proj_cats = ['3PTM','PTS','REB','AST','ST','BLK','TO']
+                my_proj = {}
+                opp_proj = {}
+                
+                for c in proj_cats:
+                    my_proj[c] = float((my_team_df[c] * my_team_df['Games_Next_7D']).sum())
+                    opp_proj[c] = float((opp_team_df[c] * opp_team_df['Games_Next_7D']).sum())
+                
+                # FG% ve FT% için sezon ortalamasını gösterelim (haftalık veri ile anlamlı birleştiremiyoruz)
+                data = []
+                sm, so = 0, 0
+                for c in cats:
+                    if c in proj_cats:
+                        my_val = my_proj[c]
+                        opp_val = opp_proj[c]
+                        # TO düşük olması iyi
+                        w = (my_val < opp_val) if c == 'TO' else (my_val > opp_val)
+                    else:
+                        my_val = my_season[c]
+                        opp_val = opp_season[c]
+                        w = (my_val < opp_val) if c == 'TO' else (my_val > opp_val)
+                    if w:
+                        sm += 1
+                    else:
+                        so += 1
+                    data.append({
+                        'Kategori': c,
+                        'Sen (Hafta)': f"{my_val:.1f}",
+                        'Rakip (Hafta)': f"{opp_val:.1f}",
+                        'Not': "Sezon ortalaması" if c in ['FG%','FT%'] else "Haftalık projeksiyon",
+                        'Durum': "✅ Üstünsün" if w else "❌ Geri"
+                    })
+                
+                # Haftalık maç sayısı ve fantezi puanı projeksiyonu
+                my_week_games = int(my_team_df['Games_Next_7D'].sum())
+                opp_week_games = int(opp_team_df['Games_Next_7D'].sum())
+                my_week_fp = float((my_team_df['Skor'] * my_team_df['Games_Next_7D']).sum())
+                opp_week_fp = float((opp_team_df['Skor'] * opp_team_df['Games_Next_7D']).sum())
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Kategori Skoru (Hafta)", f"{sm} - {so}")
+                c2.metric("Bu Hafta Maç Sayısı (Sen / Rakip)", f"{my_week_games} / {opp_week_games}")
+                c3.metric("Haftalık Fantezi Puanı Projeksiyonu", f"{my_week_fp:.0f} / {opp_week_fp:.0f}")
+                
+                st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
