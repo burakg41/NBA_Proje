@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 import yahoo_fantasy_api as yfa
 from yahoo_oauth import OAuth2
 import pandas as pd
@@ -29,7 +29,7 @@ SEASON_YEAR = 2025
 TARGET_LEAGUE_ID = "61142"  
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE_AVG = 'average_season' 
-ANALYSIS_TYPE_TOTAL = 'season' # Yeni: Total değerleri çekmek için
+ANALYSIS_TYPE_TOTAL = 'season'  # Yeni: Total değerleri çekmek için
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -50,15 +50,22 @@ TEAM_MAPPER = {
 
 def authenticate_direct():
     """Manuel Token ile Giriş"""
-    if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR": st.error("🚨 Token hatası!"); st.stop()
+    if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
+        st.error("🚨 Token hatası!")
+        st.stop()
     try:
-        with open('temp_auth.json', 'w') as f: json.dump(MANUAL_TOKEN_DATA, f)
+        with open('temp_auth.json', 'w') as f:
+            json.dump(MANUAL_TOKEN_DATA, f)
         sc = OAuth2(None, None, from_file='temp_auth.json')
         if not sc.token_is_valid():
-            try: sc.refresh_access_token()
-            except: pass
+            try:
+                sc.refresh_access_token()
+            except Exception:
+                pass
         return sc
-    except Exception as e: st.error(f"Auth Hatası: {e}"); return None
+    except Exception as e:
+        st.error(f"Auth Hatası: {e}")
+        return None
 
 @st.cache_data(ttl=3600)
 def get_schedule_espn():
@@ -78,110 +85,71 @@ def get_schedule_espn():
                             counts[abbr] = counts.get(abbr, 0) + 1
             time.sleep(0.05)
         return counts
-    except: return {k: 3 for k in TEAM_MAPPER.values()}
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_data():
-    st.caption("Sistem Başlatılıyor...")
-    sc = authenticate_direct()
-    if not sc: st.stop()
-
-    nba_schedule = get_schedule_espn()
-
-    try:
-        gm = yfa.Game(sc, 'nba')
-        t_lid = next((l for l in gm.league_ids(year=SEASON_YEAR) if TARGET_LEAGUE_ID in l), None)
-        if not t_lid: st.error("Lig Bulunamadı"); st.stop()
-        
-        lg = gm.to_league(t_lid)
-        teams = lg.teams()
-        all_data = []
-        
-        prog = st.progress(0, text="Veriler İndiriliyor...")
-        
-        for idx, t_key in enumerate(teams.keys()):
-            try:
-                roster = lg.to_team(t_key).roster()
-                p_ids = [p['player_id'] for p in roster]
-                if p_ids:
-                    # ÜÇLÜ VERİ ÇEKİMİ (GP/MPG garantilemek için)
-                    s_avg = lg.player_stats(p_ids, ANALYSIS_TYPE_AVG)
-                    s_total = lg.player_stats(p_ids, ANALYSIS_TYPE_TOTAL)
-                    try: s_m = lg.player_stats(p_ids, 'lastmonth')
-                    except: s_m = s_avg # Hata olursa ortalamayı kullan
-                    
-                    for i, pm in enumerate(roster):
-                        if i < len(s_avg):
-                            m_stat = s_m[i] if i < len(s_m) else s_avg[i]
-                            t_stat = s_total[i] if i < len(s_total) else s_avg[i]
-                            
-                            process_player(pm, s_avg[i], t_stat, m_stat, teams[t_key]['name'], "Sahipli", all_data, nba_schedule)
-            except: pass
-            prog.progress((idx + 1) / (len(teams) + 2))
-            
-        # Free Agents
-        try:
-            fa_p = lg.free_agents(None)[:80]
-            fa_ids = [p['player_id'] for p in fa_p]
-            if fa_ids:
-                s_avg = lg.player_stats(fa_ids, ANALYSIS_TYPE_AVG)
-                s_total = lg.player_stats(fa_ids, ANALYSIS_TYPE_TOTAL)
-                try: s_m = lg.player_stats(fa_ids, 'lastmonth')
-                except: s_m = s_avg
-                
-                for k, pm in enumerate(fa_p):
-                    if k < len(s_avg):
-                        m_stat = s_m[k] if k < len(s_m) else s_avg[k]
-                        t_stat = s_total[k] if k < len(s_total) else s_avg[k]
-                        process_player(pm, s_avg[k], t_stat, m_stat, "🆓 FA", "Free Agent", all_data, nba_schedule)
-        except: pass
-        
-        prog.empty()
-        return pd.DataFrame(all_data), lg
-    except Exception as e:
-        st.error(f"Hata: {e}")
-        return None, None
+    except Exception:
+        # Hata olursa herkese default 3 maç ver
+        return {k: 3 for k in TEAM_MAPPER.values()}
 
 def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
+    """Tek oyuncuyu işler, pozisyon / GP / MPG bug’lerini burada çözüyoruz."""
     try:
         def v(x): 
-            if x in ['-', None]: return 0.0
-            try: return float(x)
-            except: return 0.0
+            if x in ['-', None]:
+                return 0.0
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
         
         # "32:15" -> 32.25 formatına çevirici
         def parse_mpg(val):
-            if not val or val == '-': return 0.0
+            if not val or val == '-':
+                return 0.0
             try:
-                if ':' in str(val):
-                    m, s = map(int, str(val).split(':'))
+                val_str = str(val)
+                if ':' in val_str:
+                    m, s = map(int, val_str.split(':'))
                     return round(m + s/60, 1)
-                return float(val)
-            except: return 0.0
+                return float(val_str)
+            except Exception:
+                return 0.0
 
         name = meta['name']
         
-        # --- POZİSYON FİX (G/F/C MANTIKLI AYRIŞTIRMA) ---
-        raw_pos = meta.get('display_position', '')
-        if isinstance(raw_pos, list): raw_pos = ",".join(raw_pos)
-        
-        pos_set = raw_pos.replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F').replace('C','C')
-        
-        final_pos = ""
-        if 'G' in pos_set and 'F' not in pos_set and 'C' not in pos_set: final_pos = 'G'
-        elif 'F' in pos_set and 'C' not in pos_set and 'G' not in pos_set: final_pos = 'F'
-        elif 'C' in pos_set and 'G' not in pos_set and 'F' not in pos_set: final_pos = 'C'
-        elif 'G' in pos_set and 'F' in pos_set and 'C' not in pos_set: final_pos = 'G/F'
-        elif 'F' in pos_set and 'C' in pos_set: final_pos = 'F/C'
-        elif 'G' in pos_set and 'C' in pos_set: final_pos = 'G/C' # Nadir
-        else: final_pos = 'UTL' # Diğerleri
+        # --- POZİSYON FİX (DAHA KARARLI VE GERÇEK) ---
+        # Önce display_position, yoksa eligible_positions kullan
+        raw_pos = meta.get('display_position') or meta.get('eligible_positions') or ''
+        if isinstance(raw_pos, list):
+            pos_list = [str(p).strip() for p in raw_pos if p]
+        else:
+            pos_list = [p.strip() for p in str(raw_pos).replace(' ', '').split(',') if p]
 
-        # --- GP ve MPG (Total Stats'tan Çek) ---
-        gp = v(s_total.get('GP'))
-        # MPG verisi Yahoo'da 'Min' olarak Total statta gelir, ortalamasını alalım:
-        total_min = v(s_total.get('Min')) 
-        mpg = round(total_min / gp, 1) if gp > 0 else 0.0
-        
+        if len(pos_list) == 0:
+            final_pos = 'UTL'
+        elif len(pos_list) == 1:
+            final_pos = pos_list[0]              # Örn: "PG"
+        else:
+            final_pos = "/".join(pos_list[:2])   # Örn: "PG/SG", "SF/PF"
+
+        # --- GP ve MPG (Dayanıklı hesaplama) ---
+        # GP için birden fazla key dene
+        gp = v(
+            s_total.get('GP')
+            or s_total.get('G')
+            or s_avg.get('GP')
+            or s_avg.get('G')
+        )
+
+        # Toplam dakika: Min / MIN
+        total_min_raw = s_total.get('Min') or s_total.get('MIN')
+        total_min = v(total_min_raw)
+
+        if gp > 0 and total_min > 0:
+            mpg = round(total_min / gp, 1)
+        else:
+            # Sezon ortalamasındaki dakika alanını kullan
+            avg_min_raw = s_avg.get('Min') or s_avg.get('MIN')
+            mpg = parse_mpg(avg_min_raw)
+
         # Takım & Fikstür
         y_abbr = meta.get('editorial_team_abbr','').upper()
         team = TEAM_MAPPER.get(y_abbr, y_abbr)
@@ -201,28 +169,137 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
         inj = "🟥 "+st_c if st_c in ['INJ','O'] else ("Rx "+st_c if st_c in ['GTD','DTD'] else "✅")
         
         trend = "➖ Nötr"
-        if "🟥" in inj: trend = "🏥 Sakat"
-        elif gp < 5 or score_season < 5: trend = "⚠️ Verisiz" # Veri yoksa
-        elif mpg < 20: trend = "📉 Rotasyon" # Düşük dakika
+        if "🟥" in inj:
+            trend = "🏥 Sakat"
+        elif gp < 5 or score_season < 5:
+            trend = "⚠️ Verisiz"   # Çok az maç / veri yok
+        elif mpg < 20:
+            trend = "📉 Rotasyon"  # Düşük dakika
         else:
-            if diff >= 6.5: trend = "🔥 Formda"
-            elif diff >= 2.5: trend = "↗️ Yükselişte"
-            elif diff <= -3.0: trend = "🥶 Düşüşte"
-            else: trend = "➖ Nötr"
+            if diff >= 6.5:
+                trend = "🔥 Formda"
+            elif diff >= 2.5:
+                trend = "↗️ Yükselişte"
+            elif diff <= -3.0:
+                trend = "🥶 Düşüşte"
+            else:
+                trend = "➖ Nötr"
 
         d_list.append({
-            'Player': name, 'Team': t_name, 'Real_Team': team, 'Owner_Status': owner,
-            'Pos': final_pos, 'Health': inj, 'Trend': trend, 
+            'Player': name,
+            'Team': t_name,
+            'Real_Team': team,
+            'Owner_Status': owner,
+            'Pos': final_pos,
+            'Health': inj,
+            'Trend': trend, 
             'Games_Next_7D': int(g7), 
-            'GP': int(gp), 'MPG': mpg,
+            'GP': int(gp),
+            'MPG': mpg,
             'Skor': score_season, 
-            'FG%': v(s_avg.get('FG%'))*100, 'FT%': v(s_avg.get('FT%'))*100, 
-            '3PTM': v(s_avg.get('3PTM')), 'PTS': v(s_avg.get('PTS')),
-            'REB': v(s_avg.get('REB')), 'AST': v(s_avg.get('AST')), 'ST': v(s_avg.get('ST')),
-            'BLK': v(s_avg.get('BLK')), 'TO': v(s_avg.get('TO')),
+            'FG%': v(s_avg.get('FG%'))*100,
+            'FT%': v(s_avg.get('FT%'))*100, 
+            '3PTM': v(s_avg.get('3PTM')),
+            'PTS': v(s_avg.get('PTS')),
+            'REB': v(s_avg.get('REB')),
+            'AST': v(s_avg.get('AST')),
+            'ST': v(s_avg.get('ST')),
+            'BLK': v(s_avg.get('BLK')),
+            'TO': v(s_avg.get('TO')),
             'Raw_Stats': s_avg
         })
-    except Exception as e: print(e)
+    except Exception as e:
+        # Sessizce yutmak yerine logla
+        print("process_player error:", e)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_data():
+    st.caption("Sistem Başlatılıyor...")
+    sc = authenticate_direct()
+    if not sc:
+        st.stop()
+
+    nba_schedule = get_schedule_espn()
+
+    try:
+        gm = yfa.Game(sc, 'nba')
+        t_lid = next((l for l in gm.league_ids(year=SEASON_YEAR) if TARGET_LEAGUE_ID in l), None)
+        if not t_lid:
+            st.error("Lig Bulunamadı")
+            st.stop()
+        
+        lg = gm.to_league(t_lid)
+        teams = lg.teams()
+        all_data = []
+        
+        prog = st.progress(0, text="Veriler İndiriliyor...")
+        
+        for idx, t_key in enumerate(teams.keys()):
+            try:
+                roster = lg.to_team(t_key).roster()
+                p_ids = [p['player_id'] for p in roster]
+                if p_ids:
+                    # ÜÇLÜ VERİ ÇEKİMİ (GP/MPG garantilemek için)
+                    s_avg = lg.player_stats(p_ids, ANALYSIS_TYPE_AVG)
+                    s_total = lg.player_stats(p_ids, ANALYSIS_TYPE_TOTAL)
+                    try:
+                        s_m = lg.player_stats(p_ids, 'lastmonth')
+                    except Exception:
+                        s_m = s_avg  # Hata olursa ortalamayı kullan
+                    
+                    for i, pm in enumerate(roster):
+                        if i < len(s_avg):
+                            m_stat = s_m[i] if i < len(s_m) else s_avg[i]
+                            t_stat = s_total[i] if i < len(s_total) else s_avg[i]
+                            
+                            process_player(
+                                pm,
+                                s_avg[i],
+                                t_stat,
+                                m_stat,
+                                teams[t_key]['name'],
+                                "Sahipli",
+                                all_data,
+                                nba_schedule
+                            )
+            except Exception as e:
+                print("team loop error:", e)
+            prog.progress((idx + 1) / (len(teams) + 2))
+            
+        # Free Agents
+        try:
+            fa_p = lg.free_agents(None)[:80]
+            fa_ids = [p['player_id'] for p in fa_p]
+            if fa_ids:
+                s_avg = lg.player_stats(fa_ids, ANALYSIS_TYPE_AVG)
+                s_total = lg.player_stats(fa_ids, ANALYSIS_TYPE_TOTAL)
+                try:
+                    s_m = lg.player_stats(fa_ids, 'lastmonth')
+                except Exception:
+                    s_m = s_avg
+                
+                for k, pm in enumerate(fa_p):
+                    if k < len(s_avg):
+                        m_stat = s_m[k] if k < len(s_m) else s_avg[k]
+                        t_stat = s_total[k] if k < len(s_total) else s_avg[k]
+                        process_player(
+                            pm,
+                            s_avg[k],
+                            t_stat,
+                            m_stat,
+                            "🆓 FA",
+                            "Free Agent",
+                            all_data,
+                            nba_schedule
+                        )
+        except Exception as e:
+            print("FA loop error:", e)
+        
+        prog.empty()
+        return pd.DataFrame(all_data), lg
+    except Exception as e:
+        st.error(f"Hata: {e}")
+        return None, None
 
 # ==========================================
 # ANALİZ
@@ -230,13 +307,16 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
 def get_z_and_trade_val(df, punt):
     cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
     act = [c for c in cats if c not in punt]
-    if df.empty: return df, act
+    if df.empty:
+        return df, act
     
     for c in cats:
-        if c in punt: df[f'z_{c}'] = 0.0; continue
+        if c in punt:
+            df[f'z_{c}'] = 0.0
+            continue
         m, s = df[c].mean(), df[c].std()
-        z = (df[c]-m)/(s if s!=0 else 1)
-        df[f'z_{c}'] = -z if c=='TO' else z
+        z = (df[c] - m) / (s if s != 0 else 1)
+        df[f'z_{c}'] = -z if c == 'TO' else z
         
     df['Trade_Value'] = df[[f'z_{c}' for c in act]].sum(axis=1)
     mask = df['Health'].str.contains('🟥|Rx')
@@ -246,26 +326,66 @@ def get_z_and_trade_val(df, punt):
 
 def analyze_needs(df, my_team, act):
     m_df = df[df['Team'].str.strip() == my_team.strip()]
-    if m_df.empty: return [], []
+    if m_df.empty:
+        return [], []
     z_cols = [f'z_{c}' for c in act]
     tot = m_df[z_cols].sum().sort_values()
     return [x.replace('z_','') for x in tot.head(3).index], [x.replace('z_','') for x in tot.tail(3).index]
 
+def analyze_trade_scenario(give, recv, my_needs):
+    val_give = sum([p['Trade_Value'] for p in give])
+    val_recv = sum([p['Trade_Value'] for p in recv])
+    slot_adv = (len(give) - len(recv)) * 0.5
+    net_diff = val_recv - val_give + slot_adv
+    
+    if net_diff > 0.5 and (val_give - val_recv) > -4.0:
+        needs_met = list(set([
+            c for p in recv for c in my_needs
+            if p.get(f'z_{c}', 0) > 0.5
+        ]))
+        strategic_score = net_diff + (len(needs_met) * 1.2)
+        
+        has_injured = any(["🟥" in p['Health'] for p in recv])
+        warn = "⚠️ RİSKLİ" if has_injured else "Temiz"
+        
+        g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
+        r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
+        
+        ratio = val_give / val_recv if val_recv != 0 else 0
+        acc = "🔥 Çok Yüksek" if ratio > 0.9 else ("✅ Yüksek" if ratio > 0.75 else "🤔 Orta")
+        
+        return {
+            'Senaryo': f"{len(give)}v{len(recv)}",
+            'Verilecekler': g_str,
+            'Alınacaklar': r_str,
+            'Puan': round(strategic_score, 1),
+            'Durum': warn,
+            'Şans': acc
+        }
+    return None
+
 def trade_engine_grouped(df, my_team, target_opp, my_needs):
-    safe_me = my_team.strip(); safe_opp = target_opp.strip()
+    safe_me = my_team.strip()
+    safe_opp = target_opp.strip()
     my_roster = df[df['Team'].str.strip() == safe_me].sort_values(by='Trade_Value', ascending=True)
     opp_roster = df[df['Team'].str.strip() == safe_opp].sort_values(by='Trade_Value', ascending=False)
-    my_assets = my_roster.head(10); opp_assets = opp_roster.head(10)
+    my_assets = my_roster.head(10)
+    opp_assets = opp_roster.head(10)
     groups = {"Küçük (1-2)": [], "Orta (2-3)": [], "Büyük (3-4)": [], "Devasa (4)": []}
     
     for ng in range(1, 5):
         for nr in range(1, 5):
-            if abs(ng - nr) > 2: continue
+            if abs(ng - nr) > 2:
+                continue
             total_p = ng + nr
-            if total_p <= 3: g_name = "Küçük (1-2)"
-            elif total_p <= 5: g_name = "Orta (2-3)"
-            elif total_p <= 7: g_name = "Büyük (3-4)"
-            else: g_name = "Devasa (4)"
+            if total_p <= 3:
+                g_name = "Küçük (1-2)"
+            elif total_p <= 5:
+                g_name = "Orta (2-3)"
+            elif total_p <= 7:
+                g_name = "Büyük (3-4)"
+            else:
+                g_name = "Devasa (4)"
             
             my_combos = list(itertools.combinations(my_assets.index, ng))
             opp_combos = list(itertools.combinations(opp_assets.index, nr))
@@ -278,35 +398,16 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
                     g_list = [df.loc[i] for i in m_idx]
                     r_list = [df.loc[i] for i in o_idx]
                     res = analyze_trade_scenario(g_list, r_list, my_needs)
-                    if res: groups[g_name].append(res)
+                    if res:
+                        groups[g_name].append(res)
     
     result_dfs = {}
     for g_name, data in groups.items():
-        if data: result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Puan', ascending=False)
-        else: result_dfs[g_name] = pd.DataFrame()
+        if data:
+            result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Puan', ascending=False)
+        else:
+            result_dfs[g_name] = pd.DataFrame()
     return result_dfs
-
-def analyze_trade_scenario(give, recv, my_needs):
-    val_give = sum([p['Trade_Value'] for p in give])
-    val_recv = sum([p['Trade_Value'] for p in recv])
-    slot_adv = (len(give) - len(recv)) * 0.5
-    net_diff = val_recv - val_give + slot_adv
-    
-    if net_diff > 0.5 and (val_give - val_recv) > -4.0:
-        needs_met = list(set([c for p in recv for c in my_needs if p.get(f'z_{c}', 0) > 0.5]))
-        strategic_score = net_diff + (len(needs_met) * 1.2)
-        
-        has_injured = any(["🟥" in p['Health'] for p in recv])
-        warn = "⚠️ RİSKLİ" if has_injured else "Temiz"
-        
-        g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
-        r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
-        
-        ratio = val_give / val_recv if val_recv != 0 else 0
-        acc = "🔥 Çok Yüksek" if ratio > 0.9 else ("✅ Yüksek" if ratio > 0.75 else "🤔 Orta")
-        
-        return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Şans': acc}
-    return None
 
 # ==========================================
 # APP UI
@@ -314,7 +415,9 @@ def analyze_trade_scenario(give, recv, my_needs):
 st.title("🏀 Burak's GM Dashboard v15.0")
 
 with st.sidebar:
-    if st.button("Yenile"): st.cache_data.clear(); st.rerun()
+    if st.button("Yenile"):
+        st.cache_data.clear()
+        st.rerun()
     hide_inj = st.checkbox("Sakatları Gizle")
     punt = st.multiselect("Punt", ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'])
 
@@ -335,12 +438,18 @@ if df is not None and not df.empty:
     t1, t2, t3 = st.tabs(["Kadro", "Takas", "Rakip"])
     
     with t1:
-        tm = st.selectbox("Takım", [MY_TEAM_NAME]+sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME]))
-        show = v_df[v_df['Team']==tm].sort_values('Skor', ascending=False)
+        tm = st.selectbox(
+            "Takım",
+            [MY_TEAM_NAME] + sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME])
+        )
+        show = v_df[v_df['Team'] == tm].sort_values('Skor', ascending=False)
         st.dataframe(
-            show[['Player','Pos','Games_Next_7D','Trend','Health','Skor','GP','MPG','FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], 
+            show[['Player','Pos','Games_Next_7D','Trend','Health','Skor','GP','MPG',
+                  'FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], 
             column_config={
-                "Skor": st.column_config.ProgressColumn("Verim Puanı", format="%.1f", min_value=0, max_value=60),
+                "Skor": st.column_config.ProgressColumn(
+                    "Verim Puanı", format="%.1f", min_value=0, max_value=60
+                ),
                 "Trend": st.column_config.TextColumn("Form"),
                 "MPG": st.column_config.NumberColumn("Dakika", format="%.1f")
             },
@@ -349,28 +458,38 @@ if df is not None and not df.empty:
         )
         
     with t2:
-        ops = sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME and t!="Free Agent"])
+        ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op = st.selectbox("Hedef Takım", ops)
         if st.button("Hesapla"):
             res = trade_engine_grouped(df, MY_TEAM_NAME, op, weak)
             ts = st.tabs(list(res.keys()))
-            for t, (k, d) in zip(ts, res.items()):
-                with t:
-                    if not d.empty: st.dataframe(d.head(15), use_container_width=True, hide_index=True)
-                    else: st.info("Takas yok.")
+            for t_tab, (k, d) in zip(ts, res.items()):
+                with t_tab:
+                    if not d.empty:
+                        st.dataframe(d.head(15), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Takas yok.")
                     
     with t3:
         op_a = st.selectbox("Rakip Analiz", ops)
         if op_a:
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
-            m, o = df[df['Team']==MY_TEAM_NAME][cats].mean(), df[df['Team']==op_a][cats].mean()
+            m = df[df['Team'] == MY_TEAM_NAME][cats].mean()
+            o = df[df['Team'] == op_a][cats].mean()
             data = []
             sm, so = 0, 0
             for c in cats:
-                w = (m[c]<o[c]) if c=='TO' else (m[c]>o[c])
-                if w: sm+=1 
-                else: so+=1
-                data.append({'Kat':c, 'Ben':f"{m[c]:.1f}", 'Rakip':f"{o[c]:.1f}", 'Durum': "✅" if w else "❌"})
+                w = (m[c] < o[c]) if c == 'TO' else (m[c] > o[c])
+                if w:
+                    sm += 1 
+                else:
+                    so += 1
+                data.append({
+                    'Kat': c,
+                    'Ben': f"{m[c]:.1f}",
+                    'Rakip': f"{o[c]:.1f}",
+                    'Durum': "✅" if w else "❌"
+                })
             c1, c2 = st.columns(2)
             c1.metric("Skor", f"{sm} - {so}")
             st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
