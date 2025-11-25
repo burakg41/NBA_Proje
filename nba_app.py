@@ -11,7 +11,7 @@ import itertools
 from datetime import datetime, timedelta
 
 # ==========================================
-# 🚨 TOKEN (GÖMÜLÜ)
+# 🚨 TOKEN ALANI (GÖMÜLÜ)
 # ==========================================
 MANUAL_TOKEN_DATA = {
     "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
@@ -30,8 +30,9 @@ TARGET_LEAGUE_ID = "61142"
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM v13.0", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM v14.0", layout="wide", page_icon="🏀")
 
+# Takım Eşleştirme (ESPN Standart)
 TEAM_MAPPER = {
     'ATL': 'ATL', 'BOS': 'BOS', 'BKN': 'BKN', 'CHA': 'CHA', 'CHI': 'CHI',
     'CLE': 'CLE', 'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GS': 'GSW', 'GSW': 'GSW',
@@ -48,7 +49,7 @@ TEAM_MAPPER = {
 
 def authenticate_direct():
     if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
-        st.error("🚨 Token hatası!")
+        st.error("🚨 Token hatası! Kodun üstünü kontrol edin.")
         st.stop()
     try:
         with open('temp_auth.json', 'w') as f: json.dump(MANUAL_TOKEN_DATA, f)
@@ -58,6 +59,44 @@ def authenticate_direct():
             except: pass
         return sc
     except Exception as e: st.error(f"Auth Hatası: {e}"); return None
+
+@st.cache_data(ttl=3600)
+def get_bball_ref_stats():
+    """
+    Basketball-Reference sitesinden tüm ligin GP ve MPG verilerini çeker.
+    En güvenilir ve detaylı kaynaktır.
+    """
+    try:
+        # 2025 sezonu için (Ekim 2024 - Haziran 2025 arası '2025' olarak geçer)
+        url = "https://www.basketball-reference.com/leagues/NBA_2025_per_game.html"
+        
+        # Pandas ile tabloyu oku
+        dfs = pd.read_html(url)
+        df = dfs[0]
+        
+        # Veri Temizliği
+        # 'Player' sütununda tekrarlar olabilir (takım değiştirenler), 'Tm'='TOT' olanı veya sonuncuyu alacağız.
+        # Basitlik için ilkini alıyoruz (çoğunlukla TOT en üsttedir veya sonuncudur).
+        df = df[df['Rk'] != 'Rk'] # Başlık tekrarlarını sil
+        df = df.drop_duplicates(subset=['Player'], keep='first')
+        
+        stats_dict = {}
+        for _, row in df.iterrows():
+            try:
+                # İsim temizliği (Aksanları kaldır vs. basit normalize)
+                p_name = row['Player'].split("*")[0].strip() # Yıldız işaretini kaldır
+                clean_name = p_name.lower().replace('.', '').replace("'", "").replace('-', ' ')
+                
+                stats_dict[clean_name] = {
+                    'GP': int(row['G']),
+                    'MPG': float(row['MP'])
+                }
+            except: continue
+            
+        return stats_dict
+    except Exception as e:
+        print(f"B-Ref Hatası: {e}")
+        return {}
 
 @st.cache_data(ttl=3600)
 def get_schedule_espn():
@@ -81,11 +120,13 @@ def get_schedule_espn():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
-    st.caption("Bağlantı kuruluyor...")
+    st.caption("Sistem Başlatılıyor...")
     sc = authenticate_direct()
     if not sc: st.stop()
 
+    # Paralel Veri Çekimi
     nba_schedule = get_schedule_espn()
+    bref_stats = get_bball_ref_stats() # B-Ref verilerini al
 
     try:
         gm = yfa.Game(sc, 'nba')
@@ -110,10 +151,11 @@ def load_data():
                     for i, pm in enumerate(roster):
                         if i < len(s_s):
                             m_stat = s_m[i] if i < len(s_m) else s_s[i]
-                            process_player(pm, s_s[i], m_stat, teams[t_key]['name'], "Sahipli", all_data, nba_schedule)
+                            process_player(pm, s_s[i], m_stat, teams[t_key]['name'], "Sahipli", all_data, nba_schedule, bref_stats)
             except: pass
             prog.progress((idx + 1) / (len(teams) + 2))
             
+        # Free Agents (Limitli 80)
         try:
             fa_p = lg.free_agents(None)[:80]
             fa_ids = [p['player_id'] for p in fa_p]
@@ -124,7 +166,7 @@ def load_data():
                 for k, pm in enumerate(fa_p):
                     if k < len(s_s):
                         m_stat = s_m[k] if k < len(s_m) else s_s[k]
-                        process_player(pm, s_s[k], m_stat, "🆓 FA", "Free Agent", all_data, nba_schedule)
+                        process_player(pm, s_s[k], m_stat, "🆓 FA", "Free Agent", all_data, nba_schedule, bref_stats)
         except: pass
         
         prog.empty()
@@ -133,26 +175,16 @@ def load_data():
         st.error(f"Hata: {e}")
         return None, None
 
-def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
+def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched, bref_stats):
     try:
         def v(x): 
             if x in ['-', None]: return 0.0
             try: return float(x)
             except: return 0.0
-        
-        # "32:15" -> 32.25 formatına çevirici
-        def parse_mpg(val):
-            if not val or val == '-': return 0.0
-            try:
-                if ':' in str(val):
-                    m, s = map(int, str(val).split(':'))
-                    return round(m + s/60, 1)
-                return float(val)
-            except: return 0.0
 
         name = meta['name']
         
-        # Pozisyon
+        # --- POZİSYON FİX ---
         raw_pos = meta.get('display_position', '')
         if not raw_pos: raw_pos = meta.get('position_type', 'F')
         if isinstance(raw_pos, list): raw_pos = ",".join(raw_pos)
@@ -165,9 +197,17 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         team = TEAM_MAPPER.get(y_abbr, y_abbr)
         g7 = n_sched.get(team, 3) 
         
-        # --- GP ve MPG (Yahoo'dan) ---
-        gp = v(s_s.get('GP'))
-        mpg = parse_mpg(s_s.get('MPG')) # Yahoo'da MPG anahtarı varsa alır
+        # --- GP ve MPG (Basketball-Reference'dan) ---
+        # İsim eşleştirme
+        c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+        
+        # Varsayılan değerler (Eğer B-Ref'te yoksa)
+        gp = v(s_s.get('GP')) # Önce Yahoo'dan al
+        mpg = 0.0
+        
+        if c_name in bref_stats:
+            gp = bref_stats[c_name]['GP']
+            mpg = bref_stats[c_name]['MPG']
         
         # --- SKOR (Verimlilik Puanı) ---
         def calc_fp(stats):
@@ -181,7 +221,9 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         score_season = calc_fp(s_s)
         score_month = calc_fp(s_m)
         
-        # --- FORM VE DURUM ANALİZİ ---
+        # --- AKILLI FORM ANALİZİ (Süre ve Maç Bazlı) ---
+        diff = score_month - score_season
+        
         st_c = meta.get('status','')
         inj = "🟥 "+st_c if st_c in ['INJ','O'] else ("Rx "+st_c if st_c in ['GTD','DTD'] else "✅")
         
@@ -189,16 +231,15 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         
         if "🟥" in inj:
             trend = "🏥 Sakat"
-        elif gp < 5:
+        elif gp < 5: # 5 maçtan az oynadıysa
             trend = "⚠️ Az Maç"
-        elif mpg > 0 and mpg < 20: # 20 Dakika altı rotasyon oyuncusu
+        elif mpg > 0 and mpg < 22: # 22 Dakika altı rotasyon
             trend = "📉 Rotasyon"
         else:
             # Normal Form Hesabı
-            diff = score_month - score_season
             if diff >= 6.5: trend = "🔥 Formda"
             elif diff >= 2.5: trend = "↗️ Yükselişte"
-            elif diff <= -3.0: trend = "🥶 Formda Değil"
+            elif diff <= -3.0: trend = "🥶 Düşüşte"
             else: trend = "➖ Nötr"
 
         d_list.append({
@@ -216,7 +257,7 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
     except Exception as e: print(e)
 
 # ==========================================
-# ANALİZ
+# ANALİZ (TRADE MOTORU İÇİN Z-SCORE)
 # ==========================================
 def get_z_and_trade_val(df, punt):
     cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
@@ -224,12 +265,15 @@ def get_z_and_trade_val(df, punt):
     if df.empty: return df, act
     
     for c in cats:
-        if c in punt: df[f'z_{c}'] = 0.0; continue
+        if c in punt: 
+            df[f'z_{c}'] = 0.0
+            continue
         m, s = df[c].mean(), df[c].std()
         z = (df[c]-m)/(s if s!=0 else 1)
         df[f'z_{c}'] = -z if c=='TO' else z
         
     df['Trade_Value'] = df[[f'z_{c}' for c in act]].sum(axis=1)
+    # Sakatlık Cezası (%50)
     mask = df['Health'].str.contains('🟥|Rx')
     df.loc[mask, 'Trade_Value'] *= 0.5
     return df, act
@@ -311,7 +355,7 @@ def analyze_trade_scenario(give, recv, my_needs):
 # ==========================================
 # APP UI
 # ==========================================
-st.title("🏀 Burak's GM Dashboard v13.0")
+st.title("🏀 Burak's GM Dashboard v14.0")
 
 with st.sidebar:
     if st.button("Yenile"): st.cache_data.clear(); st.rerun()
@@ -322,6 +366,7 @@ df, lg = load_data()
 
 if df is not None and not df.empty:
     df['Team'] = df['Team'].astype(str).str.strip()
+    
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
