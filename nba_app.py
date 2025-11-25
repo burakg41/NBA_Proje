@@ -170,6 +170,50 @@ def get_nba_base_stats():
         return None
 
 # ==========================================
+# MATCHUPS YARDIMCI FONKSİYONLARI
+# ==========================================
+def extract_matchups_list(raw):
+    """
+    Yahoo matchups() çıktısı bazen dict, bazen list, bazen iç içe yapılar olabiliyor.
+    Bu fonksiyon, içinden 'teams' veya 'team' key'i içeren dict'lerin bulunduğu listeyi yakalamaya çalışır.
+    """
+    if isinstance(raw, list):
+        return raw
+
+    if isinstance(raw, dict):
+        # En yaygın pattern
+        if 'matchups' in raw and isinstance(raw['matchups'], list):
+            return raw['matchups']
+        # İç içe arama (sadece 1-2 seviye derine bakıyoruz, çok ağır değil)
+        for v in raw.values():
+            if isinstance(v, (list, dict)):
+                candidate = extract_matchups_list(v)
+                if candidate:
+                    return candidate
+
+    return []
+
+def normalize_matchup_obj(mu):
+    """
+    Bir matchupu her durumda dict'e indirger:
+    - Eğer mu dict ise direkt döner
+    - Eğer list ise içindeki 'teams' veya 'team' key'ine sahip ilk dict'i döner
+    - Hiçbiri değilse None
+    """
+    if isinstance(mu, dict):
+        return mu
+    if isinstance(mu, list):
+        # Önce teams/team içeren dict'leri dene
+        for item in mu:
+            if isinstance(item, dict) and ('teams' in item or 'team' in item):
+                return item
+        # Sonra herhangi bir dict
+        for item in mu:
+            if isinstance(item, dict):
+                return item
+    return None
+
+# ==========================================
 # PLAYER PROCESS
 # ==========================================
 def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, team_games_window, nba_df):
@@ -585,7 +629,6 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
             try:
                 week = lg.current_week()
             except Exception:
-                st.warning("Mevcut hafta bilgisi alınamadı (lg.current_week).")
                 return None
 
         # --- 2) Stat ID -> display name map ---
@@ -660,29 +703,16 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
                     result[label] = val
             return result
 
-        # --- 5) matchups çıktısı list/dict olabilir, normalize et ---
+        # --- 5) matchups çıktısını normalize et ---
         matchups_raw = lg.matchups(week)
-
-        if isinstance(matchups_raw, dict):
-            if 'matchups' in matchups_raw and isinstance(matchups_raw['matchups'], list):
-                matchups = matchups_raw['matchups']
-            else:
-                matchups = []
-        elif isinstance(matchups_raw, list):
-            matchups = matchups_raw
-        else:
-            matchups = []
+        matchups = extract_matchups_list(matchups_raw)
 
         for mu in matchups:
-            if isinstance(mu, list):
-                mu = next((x for x in mu if isinstance(x, dict)), None)
-                if mu is None:
-                    continue
-
-            if not isinstance(mu, dict):
+            mu_norm = normalize_matchup_obj(mu)
+            if not isinstance(mu_norm, dict):
                 continue
 
-            teams_obj = mu.get('teams') or mu.get('team')
+            teams_obj = mu_norm.get('teams') or mu_norm.get('team')
             if isinstance(teams_obj, dict) and 'team' in teams_obj:
                 tlist = teams_obj['team']
             else:
@@ -1028,7 +1058,7 @@ if df is not None and not df.empty:
 
         st.markdown("### 📊 Lig Geneli Takım Analizi (Güçlü/Zayıf Yönler)")
         
-        # 1. Heatmap Expander (matplotlib'siz, sade tablo)
+        # 1. Z-Score Tablosu
         with st.expander("Detaylı Z-Score Tablosu", expanded=False):
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
             for c in cats:
@@ -1046,7 +1076,6 @@ if df is not None and not df.empty:
             if "Free Agent" in team_z.index:
                 team_z = team_z.drop("Free Agent")
             
-            # 🔧 BURASI DEĞİŞTİ: Styler + background_gradient yerine düz tablo
             st.dataframe(team_z.round(2), use_container_width=True)
 
         # 2. Top 3 / Bottom 3 Summary
@@ -1250,9 +1279,9 @@ if df is not None and not df.empty:
 
                 if weekly_totals is None:
                     st.info(
-                        "Yahoo bu hafta için canlı toplam istatistik döndürmüyor. "
-                        "Bu genelde hafta henüz tam başlamadığında, playoff/konso haftalarında "
-                        "veya lig formatı desteklenmediğinde görülür. Yukarıdaki projeksiyonlar normal çalışıyor."
+                        "Yahoo bu hafta için canlı toplam istatistik döndürmüyor veya format desteklenmiyor. "
+                        "Bu durumda yukarıdaki projeksiyonlar (ESPN fikstür + sezon istatistikleri) tam çalışıyor; "
+                        "sadece canlı 'gerçekleşen toplamlar' tablosu boş kalıyor."
                     )
                 else:
                     des_cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
@@ -1283,16 +1312,7 @@ if df is not None and not df.empty:
         try:
             week = lg.current_week()
             matchups_raw = lg.matchups(week)
-            
-            if isinstance(matchups_raw, dict):
-                if 'matchups' in matchups_raw and isinstance(matchups_raw['matchups'], list):
-                    matchups = matchups_raw['matchups']
-                else:
-                    matchups = []
-            elif isinstance(matchups_raw, list):
-                matchups = matchups_raw
-            else:
-                matchups = []
+            matchups = extract_matchups_list(matchups_raw)
             
             scoreboard_data = []
             
@@ -1308,15 +1328,11 @@ if df is not None and not df.empty:
             desired_labels = set(cats)
             
             for mu in matchups:
-                if isinstance(mu, list):
-                    mu = next((x for x in mu if isinstance(x, dict)), None)
-                    if mu is None:
-                        continue
-
-                if not isinstance(mu, dict):
+                mu_norm = normalize_matchup_obj(mu)
+                if not isinstance(mu_norm, dict):
                     continue
 
-                teams_obj = mu.get('teams') or mu.get('team')
+                teams_obj = mu_norm.get('teams') or mu_norm.get('team')
                 if isinstance(teams_obj, dict) and 'team' in teams_obj:
                     tlist = teams_obj['team']
                 else:
@@ -1398,7 +1414,17 @@ if df is not None and not df.empty:
                     "Takım B": name_b
                 })
             
-            st.dataframe(pd.DataFrame(scoreboard_data), use_container_width=True, hide_index=True)
+            if scoreboard_data:
+                st.dataframe(pd.DataFrame(scoreboard_data), use_container_width=True, hide_index=True)
+            else:
+                st.info(
+                    "Yahoo şu an bu hafta için lig matchuplarını istatistikleriyle birlikte döndürmüyor. "
+                    "Bu durum genelde sezon başı/sonu, playoff/konso haftaları veya özel lig formatlarında olabiliyor."
+                )
             
         except Exception as e:
-            st.error(f"Lig durumu alınırken hata oluştu: {e}")
+            st.info(
+                "Lig durumu alınırken Yahoo cevap formatı beklenenden farklı geldiği için skor tablosu çizilemedi. "
+                "Bu proje fonksiyonel, sadece 'Lig Durumu' sekmesinin canlı skor özelliği devre dışı kaldı. "
+                f"(Teknik detay: {e})"
+            )
