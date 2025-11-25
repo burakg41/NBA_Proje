@@ -20,7 +20,7 @@ TARGET_LEAGUE_ID = "61142"
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM Dashboard v9.1", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM Dashboard v9.2", layout="wide", page_icon="🏀")
 
 # --- NBA API ---
 try:
@@ -41,35 +41,52 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# 1. VERİ ÇEKME MOTORU
+# 1. VERİ ÇEKME MOTORU (GÜÇLENDİRİLMİŞ)
 # ==========================================
 
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
-    """NBA.com'dan gerçek istatistikleri çeker."""
+    """
+    NBA.com'dan istatistikleri çeker.
+    Timeout ve Retry mekanizması eklenmiştir.
+    """
     if not NBA_API_AVAILABLE: return {}
-    try:
-        custom_headers = {
-            'Host': 'stats.nba.com',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://www.nba.com/',
-            'Connection': 'keep-alive'
-        }
-        stats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=NBA_SEASON_STRING, 
-            per_mode_detailed='PerGame',
-            timeout=45,
-            headers=custom_headers
-        )
-        df = stats.get_data_frames()[0]
-        nba_data = {}
-        for index, row in df.iterrows():
-            clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
-            nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
-        return nba_data
-    except Exception as e: 
-        print(f"⚠️ İstatistik API Hatası: {e}")
-        return {}
+    
+    # Güçlü Headerlar (Anti-Block)
+    custom_headers = {
+        'Host': 'stats.nba.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'x-nba-stats-origin': 'stats',
+        'x-nba-stats-token': 'true',
+        'Referer': 'https://www.nba.com/',
+        'Connection': 'keep-alive'
+    }
+
+    # 3 Kere Dene
+    for attempt in range(3):
+        try:
+            time.sleep(1) # Nefes al
+            stats = leaguedashplayerstats.LeagueDashPlayerStats(
+                season=NBA_SEASON_STRING, 
+                per_mode_detailed='PerGame',
+                timeout=60, # Süreyi artırdık
+                headers=custom_headers
+            )
+            df = stats.get_data_frames()[0]
+            nba_data = {}
+            for index, row in df.iterrows():
+                clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+                nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
+            return nba_data
+            
+        except Exception as e:
+            print(f"Deneme {attempt+1} Başarısız: {e}")
+            time.sleep(3) # Bekle ve tekrar dene
+
+    return {} # Başaramazsa boş dön (Program çökmesin)
 
 @st.cache_data(ttl=3600)
 def get_schedule_robust():
@@ -82,7 +99,7 @@ def get_schedule_robust():
         for i in range(7):
             date_str = (today + timedelta(days=i)).strftime('%Y%m%d')
             url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={date_str}"
-            r = requests.get(url, timeout=3)
+            r = requests.get(url, timeout=5) # ESPN hızlıdır, 5sn yeter
             if r.status_code == 200:
                 data = r.json()
                 for event in data.get('events', []):
@@ -108,21 +125,14 @@ def _simulate_schedule():
     return sim_counts
 
 def authenticate_yahoo():
-    """
-    Cloud Uyumlu Kimlik Doğrulama:
-    1. Önce Streamlit Secrets'a bakar (Cloud için).
-    2. Yoksa yerel 'oauth2.json' dosyasına bakar (Local için).
-    """
-    # CLOUD İÇİN: Secrets'tan dosya oluştur
+    """Cloud Uyumlu Kimlik Doğrulama"""
     if 'yahoo_auth' in st.secrets:
         try:
-            # Secrets verisini JSON formatına çevirip dosyaya yazıyoruz
             data = dict(st.secrets['yahoo_auth'])
             with open('oauth2.json', 'w') as f:
                 json.dump(data, f)
         except Exception: pass
 
-    # LOCAL & CLOUD (Dosya oluştuktan sonra):
     if os.path.exists('oauth2.json'):
         try:
             sc = OAuth2(None, None, from_file='oauth2.json')
@@ -138,13 +148,15 @@ def load_data():
     
     status.write("📅 Fikstür verisi çekiliyor...")
     nba_schedule = get_schedule_robust()
-    
     is_sim = all(v in [3,4] for v in list(nba_schedule.values())[:5])
     if is_sim: status.warning("⚠️ Canlı fikstür alınamadı. Simülasyon modu aktif.")
     else: status.write("✅ Canlı fikstür alındı.")
 
-    status.write("📊 İstatistikler güncelleniyor...")
+    status.write("📊 İstatistikler güncelleniyor (Bu işlem 30-40sn sürebilir)...")
     nba_stats_dict = get_nba_real_stats()
+    
+    if not nba_stats_dict:
+        status.warning("⚠️ NBA İstatistikleri çekilemedi (Timeout). Yahoo verileriyle devam ediliyor.")
     
     status.write("🔐 Yahoo Fantasy'ye bağlanılıyor...")
     sc = authenticate_yahoo()
@@ -376,7 +388,7 @@ def analyze_trade_scenario(give, recv, my_needs):
         return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Kabul İhtimali': acc}
     return None
 
-st.title("🏀 Burak's GM Dashboard v9.1 (Cloud Ready)")
+st.title("🏀 Burak's GM Dashboard v9.2")
 
 with st.sidebar:
     st.header("Ayarlar")
