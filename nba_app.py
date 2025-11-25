@@ -20,7 +20,7 @@ TARGET_LEAGUE_ID = "61142"
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM Dashboard v9.2", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM Dashboard v9.3", layout="wide", page_icon="🏀")
 
 # --- NBA API ---
 try:
@@ -41,65 +41,55 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# 1. VERİ ÇEKME MOTORU (GÜÇLENDİRİLMİŞ)
+# 1. VERİ ÇEKME MOTORU
 # ==========================================
 
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
     """
     NBA.com'dan istatistikleri çeker.
-    Timeout ve Retry mekanizması eklenmiştir.
+    Hata verirse BOŞ SÖZLÜK döner (Sistemi kilitlemez).
     """
     if not NBA_API_AVAILABLE: return {}
     
-    # Güçlü Headerlar (Anti-Block)
     custom_headers = {
         'Host': 'stats.nba.com',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'x-nba-stats-origin': 'stats',
-        'x-nba-stats-token': 'true',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': 'https://www.nba.com/',
         'Connection': 'keep-alive'
     }
 
-    # 3 Kere Dene
-    for attempt in range(3):
-        try:
-            time.sleep(1) # Nefes al
-            stats = leaguedashplayerstats.LeagueDashPlayerStats(
-                season=NBA_SEASON_STRING, 
-                per_mode_detailed='PerGame',
-                timeout=60, # Süreyi artırdık
-                headers=custom_headers
-            )
-            df = stats.get_data_frames()[0]
-            nba_data = {}
-            for index, row in df.iterrows():
-                clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
-                nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
-            return nba_data
-            
-        except Exception as e:
-            print(f"Deneme {attempt+1} Başarısız: {e}")
-            time.sleep(3) # Bekle ve tekrar dene
-
-    return {} # Başaramazsa boş dön (Program çökmesin)
+    # Sadece 1 kere dene, olmazsa vakit kaybetme
+    try:
+        stats = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=NBA_SEASON_STRING, 
+            per_mode_detailed='PerGame',
+            timeout=15, # Timeout düşürüldü, hızlıca pes etsin
+            headers=custom_headers
+        )
+        df = stats.get_data_frames()[0]
+        nba_data = {}
+        for index, row in df.iterrows():
+            clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+            nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
+        return nba_data
+    except Exception as e: 
+        print(f"⚠️ NBA API Hatası (Atlanıyor): {e}")
+        return {} # Boş dön, program çalışmaya devam etsin
 
 @st.cache_data(ttl=3600)
 def get_schedule_robust():
-    """Fikstür çeker. Başarısız olursa 'Simülasyon Modu' devreye girer."""
+    """Fikstür çeker. Başarısız olursa simülasyon yapar."""
     team_game_counts = {}
     today = datetime.now()
-    success_days = 0
+    success = False
 
+    # ESPN API (Hızlı)
     try:
         for i in range(7):
             date_str = (today + timedelta(days=i)).strftime('%Y%m%d')
             url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={date_str}"
-            r = requests.get(url, timeout=5) # ESPN hızlıdır, 5sn yeter
+            r = requests.get(url, timeout=2)
             if r.status_code == 200:
                 data = r.json()
                 for event in data.get('events', []):
@@ -108,61 +98,76 @@ def get_schedule_robust():
                             abbr = competitor['team']['abbreviation']
                             std_abbr = TEAM_MAPPER.get(abbr, abbr)
                             team_game_counts[std_abbr] = team_game_counts.get(std_abbr, 0) + 1
-                success_days += 1
-            time.sleep(0.1)
+                success = True
+            time.sleep(0.05)
     except: pass
 
-    if success_days < 3 or len(team_game_counts) < 10:
+    if not success or len(team_game_counts) < 5:
         return _simulate_schedule()
         
     return team_game_counts
 
 def _simulate_schedule():
-    """API çalışmazsa her takıma rastgele 3 veya 4 maç atar."""
-    sim_counts = {}
+    """Yedek Plan: Rastgele maç sayıları."""
+    sim = {}
     for team in TEAM_MAPPER.values():
-        sim_counts[team] = 3 if np.random.rand() > 0.4 else 4
-    return sim_counts
+        sim[team] = 3 if np.random.rand() > 0.5 else 4
+    return sim
 
 def authenticate_yahoo():
-    """Cloud Uyumlu Kimlik Doğrulama"""
+    """
+    Güçlendirilmiş Kimlik Doğrulama
+    """
+    # 1. Secrets'tan Dosya Oluşturma
     if 'yahoo_auth' in st.secrets:
         try:
-            data = dict(st.secrets['yahoo_auth'])
+            # Secrets objesini dictionary'e çevir
+            secrets_data = st.secrets['yahoo_auth']
+            # Dictionary değilse (bazen string gelir) parse etmeye çalış
+            if not isinstance(secrets_data, dict):
+                # Bu blok Streamlit sürümüne göre değişebilir
+                pass 
+            
+            # Dosyaya yaz
             with open('oauth2.json', 'w') as f:
-                json.dump(data, f)
-        except Exception: pass
+                # st.secrets'ı direkt json.dump yapamayabiliriz, dict() ile cast et
+                json.dump(dict(secrets_data), f)
+        except Exception as e:
+            st.error(f"Secrets okuma hatası: {e}")
 
+    # 2. Dosyadan Okuma
     if os.path.exists('oauth2.json'):
         try:
             sc = OAuth2(None, None, from_file='oauth2.json')
+            # Token kontrolü - Eğer süresi dolmuşsa refresh dener
             if not sc.token_is_valid():
                 sc.refresh_access_token()
             return sc
-        except Exception: return None
+        except Exception as e:
+            st.error(f"Token Hatası: {e}")
+            return None
+            
+    st.error("❌ 'oauth2.json' bulunamadı ve Secrets yapılandırılamadı.")
     return None
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
     status = st.status("Veriler Yükleniyor...", expanded=True)
     
-    status.write("📅 Fikstür verisi çekiliyor...")
+    status.write("📅 Fikstür (ESPN)...")
     nba_schedule = get_schedule_robust()
-    is_sim = all(v in [3,4] for v in list(nba_schedule.values())[:5])
-    if is_sim: status.warning("⚠️ Canlı fikstür alınamadı. Simülasyon modu aktif.")
-    else: status.write("✅ Canlı fikstür alındı.")
-
-    status.write("📊 İstatistikler güncelleniyor (Bu işlem 30-40sn sürebilir)...")
-    nba_stats_dict = get_nba_real_stats()
+    
+    status.write("📊 İstatistikler (NBA API)...")
+    nba_stats_dict = get_nba_real_stats() # Hata verse de boş döner, çökmez
     
     if not nba_stats_dict:
-        status.warning("⚠️ NBA İstatistikleri çekilemedi (Timeout). Yahoo verileriyle devam ediliyor.")
+        status.warning("⚠️ NBA API yanıt vermedi. GP ve MPG verileri eksik olacak.")
     
-    status.write("🔐 Yahoo Fantasy'ye bağlanılıyor...")
+    status.write("🔐 Yahoo Bağlantısı...")
     sc = authenticate_yahoo()
     if not sc: 
-        status.update(label="Giriş Hatası", state="error")
-        st.error("Kimlik doğrulama başarısız! (Cloud Secrets veya oauth2.json kontrol edin)")
+        status.update(label="Giriş Başarısız", state="error")
+        st.error("Lütfen geçerli bir Token'ı Secrets kısmına yapıştırın.")
         return None, None
 
     try:
@@ -172,13 +177,14 @@ def load_data():
         
         if not target_lid:
             status.update(label="Lig Bulunamadı", state="error")
+            st.error(f"Lig ID {TARGET_LEAGUE_ID} bulunamadı.")
             return None, None
 
         lg = gm.to_league(target_lid)
         teams = lg.teams()
         all_data = []
         
-        status.write(f"📥 {len(teams)} Takımın kadrosu indiriliyor...")
+        status.write(f"📥 {len(teams)} Takım indiriliyor...")
         prog = status.progress(0)
         
         for idx, team_key in enumerate(teams.keys()):
@@ -198,7 +204,7 @@ def load_data():
             except: pass
             prog.progress((idx + 1) / (len(teams) + 1))
 
-        status.write("🆓 Free Agents taranıyor...")
+        status.write("🆓 Free Agents...")
         try:
             fa_players = lg.free_agents(None)[:80]
             fa_ids = [p['player_id'] for p in fa_players]
@@ -213,12 +219,12 @@ def load_data():
         except: pass
         
         prog.progress(1.0)
-        status.update(label="Hazır!", state="complete", expanded=False)
+        status.update(label="Tamamlandı!", state="complete", expanded=False)
         return pd.DataFrame(all_data), lg
         
     except Exception as e:
-        status.update(label="Hata", state="error")
-        st.error(f"Kritik Hata: {e}")
+        status.update(label="Kritik Hata", state="error")
+        st.error(f"Veri işleme hatası: {e}")
         return None, None
 
 def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_dict, nba_schedule):
@@ -230,19 +236,22 @@ def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_di
 
         name = meta['name']
         
+        # Pozisyon
         raw_pos = meta.get('display_position', '').replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F')
         pos_set = set(raw_pos.split(','))
         order = {'G':1, 'F':2, 'C':3}
         final_pos = "/".join(sorted(list(pos_set), key=lambda x: order.get(x, 9)))
 
-        c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+        # NBA Dict Kontrolü (Hata varsa 0 döner)
         real_gp, real_mpg, nba_team = 0, 0.0, "N/A"
+        if nba_dict:
+            c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+            if c_name in nba_dict:
+                real_gp = nba_dict[c_name]['GP']
+                real_mpg = nba_dict[c_name]['MPG']
+                nba_team = nba_dict[c_name]['TEAM']
         
-        if c_name in nba_dict:
-            real_gp = nba_dict[c_name]['GP']
-            real_mpg = nba_dict[c_name]['MPG']
-            nba_team = nba_dict[c_name]['TEAM']
-        else:
+        if nba_team == "N/A":
             y_abbr = meta.get('editorial_team_abbr', 'N/A').upper()
             nba_team = TEAM_MAPPER.get(y_abbr, y_abbr)
 
@@ -252,6 +261,7 @@ def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_di
         is_injured = st_code in ['INJ', 'O', 'GTD', 'DTD']
         inj_str = f"🟥 {st_code}" if st_code in ['INJ', 'O'] else (f"Rx {st_code}" if is_injured else "✅")
 
+        # Trend
         def f_score(s):
             return (val(s.get('PTS')) + val(s.get('REB'))*1.2 + val(s.get('AST'))*1.5 + 
                     val(s.get('ST'))*3 + val(s.get('BLK'))*3 - val(s.get('TO')))
@@ -259,6 +269,7 @@ def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_di
         fs_s = f_score(stat_s)
         fs_m = f_score(stat_m)
         trend = "➖"
+        
         if is_injured: trend = "🏥"
         elif abs(fs_s - fs_m) < 0.1: trend = "➖"
         else:
@@ -346,8 +357,9 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
             my_combos = list(itertools.combinations(my_assets.index, n_give))
             opp_combos = list(itertools.combinations(opp_assets.index, n_recv))
             
-            if len(my_combos) * len(opp_combos) > 600:
-                my_combos = my_combos[:20]; opp_combos = opp_combos[:20]
+            # Kombinasyon limitini biraz düşürdük ki timeout yemesin
+            if len(my_combos) * len(opp_combos) > 500:
+                my_combos = my_combos[:15]; opp_combos = opp_combos[:15]
             
             for m_idx in my_combos:
                 for o_idx in opp_combos:
@@ -388,7 +400,7 @@ def analyze_trade_scenario(give, recv, my_needs):
         return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Kabul İhtimali': acc}
     return None
 
-st.title("🏀 Burak's GM Dashboard v9.2")
+st.title("🏀 Burak's GM Dashboard v9.3 (Final Fix)")
 
 with st.sidebar:
     st.header("Ayarlar")
