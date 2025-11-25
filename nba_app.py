@@ -39,6 +39,9 @@ ANALYSIS_TYPE_TOTAL = 'season'
 
 NBA_SEASON_STRING = "2025-26"
 
+# Cache'i kırmak için versiyon anahtarı
+DATA_VERSION = "v16_trend_injury_fix"
+
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
 TEAM_MAPPER = {
@@ -221,12 +224,13 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         score_season = calc_fp(s_avg)
         score_month = calc_fp(s_m)
         
-        # Sağlık
-        st_c = meta.get('status','')
-        if st_c in ['INJ', 'O']:
-            inj = "🔴 Sakat"
-        elif st_c in ['GTD','DTD']:
-            inj = "🟠 Riskli"
+        # Sağlık - Yahoo status yakalama
+        raw_status = str(meta.get('status', '') or '').upper()
+        # Tipik durumlar: 'O', 'GTD', 'DTD', 'IR', 'IL', 'IL+', 'NA', ''
+        if raw_status in ['O', 'OUT', 'IR', 'IL', 'IL+', 'INJ']:
+            inj = f"🔴 Sakat ({raw_status})"
+        elif raw_status in ['GTD', 'DTD', 'NA', 'DAY_TO_DAY']:
+            inj = f"🟠 Riskli ({raw_status})"
         else:
             inj = "🟢 Sağlıklı"
 
@@ -237,7 +241,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
             if gp < 5 or score_season < 5:
                 trend = "⚪ Verisiz"
             else:
-                # Aşırı formda (eşiği yükselttik)
+                # Aşırı formda (yüksek eşik)
                 if mpg >= 32 and score_season >= 32:
                     trend = "🟣 Aşırı Formda"
                 # Formda
@@ -283,9 +287,10 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
     except Exception as e:
         print("process_player error:", e)
 
+# DATA_VERSION cache key'e girsin diye parametreli
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_data():
-    st.caption("Sistem Başlatılıyor...")
+def load_data(version: str):
+    st.caption(f"Sistem Başlatılıyor... (ver: {version})")
     sc = authenticate_direct()
     if not sc:
         st.stop()
@@ -392,7 +397,7 @@ def get_z_and_trade_val(df, punt):
         df[f'z_{c}'] = -z if c == 'TO' else z
         
     df['Uygunluk_Puanı'] = df[[f'z_{c}' for c in act]].sum(axis=1)
-    mask = df['Health'].astype(str).str.contains('🔴|🟠', regex=True, na=False)
+    mask = df['Health'].astype(str).str.contains('Sakat|Riskli', regex=True, na=False)
     df.loc[mask, 'Uygunluk_Puanı'] *= 0.5
     
     return df, act
@@ -434,7 +439,7 @@ def analyze_trade_scenario(give, recv, my_needs):
         ]))
         strategic_score = net_diff + (len(needs_met) * 1.2)
         
-        has_injured = any(["🔴" in p['Health'] or "🟠" in p['Health'] for p in recv])
+        has_injured = any(["Sakat" in p['Health'] or "Riskli" in p['Health'] for p in recv])
         warn = "⚠️ RİSKLİ" if has_injured else "Temiz"
         
         g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
@@ -524,7 +529,7 @@ with st.sidebar:
     hide_inj = st.checkbox("Sakatları gizle")
     punt = st.multiselect("Punt Kategorileri", ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'])
 
-df, lg = load_data()
+df, lg = load_data(DATA_VERSION)
 
 if df is not None and not df.empty:
     df['Team'] = df['Team'].astype(str).str.strip()
@@ -532,9 +537,9 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
-    # 🔧 Sakatları gizle (🔴 + 🟠)
+    # 🔧 Sakat + Riskli oyuncuları gizle
     if hide_inj:
-        inj_mask = df['Health'].astype(str).str.contains("🔴|🟠", regex=True, na=False)
+        inj_mask = df['Health'].astype(str).str.contains("Sakat|Riskli", regex=True, na=False)
         v_df = df.loc[~inj_mask].copy()
     else:
         v_df = df.copy()
