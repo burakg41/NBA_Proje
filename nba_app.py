@@ -10,6 +10,12 @@ import requests
 import itertools 
 from datetime import datetime, timedelta
 
+# NBA API (GP & MPG için)
+try:
+    from nba_api.stats.endpoints import leaguedashplayerstats
+except ImportError:
+    leaguedashplayerstats = None
+
 # ==========================================
 # 🚨 TOKEN ALANI (DOLU VE HAZIR)
 # ==========================================
@@ -29,7 +35,10 @@ SEASON_YEAR = 2025
 TARGET_LEAGUE_ID = "61142"  
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE_AVG = 'average_season' 
-ANALYSIS_TYPE_TOTAL = 'season'  # Yeni: Total değerleri çekmek için
+ANALYSIS_TYPE_TOTAL = 'season'
+
+# NBA sezon stringi (nba_api için)
+NBA_SEASON_STRING = "2025-26"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -43,6 +52,24 @@ TEAM_MAPPER = {
     'PHO': 'PHX', 'PHX': 'PHX', 'POR': 'POR', 'SA': 'SAS', 'SAS': 'SAS', 
     'SAC': 'SAC', 'TOR': 'TOR', 'UTAH': 'UTA', 'UTA': 'UTA', 'WAS': 'WAS', 'WSH': 'WAS'
 }
+
+# ==========================================
+# HELPER: İSİM NORMALİZASYONU (NBA <-> YAHOO)
+# ==========================================
+def normalize_name(name: str) -> str:
+    if not name:
+        return ""
+    n = name.upper()
+    # Nokta, apostrof vs temizle
+    for ch in [".", "'", "`"]:
+        n = n.replace(ch, "")
+    # JR, SR, III, II, IV gibi son ekleri at
+    for suf in [" JR", " SR", " III", " II", " IV"]:
+        if n.endswith(suf):
+            n = n[: -len(suf)]
+    # Çift boşluk temizle
+    n = " ".join(n.split())
+    return n
 
 # ==========================================
 # 1. AUTH & VERİ ÇEKME
@@ -89,7 +116,29 @@ def get_schedule_espn():
         # Hata olursa herkese default 3 maç ver
         return {k: 3 for k in TEAM_MAPPER.values()}
 
-def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
+@st.cache_data(ttl=3600)
+def get_nba_base_stats():
+    """
+    NBA resmi istatistiklerinden GP & MPG (MIN) çek.
+    PerGame modunda: GP, MIN sütunları var.
+    """
+    if leaguedashplayerstats is None:
+        print("nba_api yüklü değil, NBA base stats alınamıyor.")
+        return None
+    try:
+        resp = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=NBA_SEASON_STRING,
+            per_mode_detailed='PerGame'
+        )
+        df = resp.get_data_frames()[0]
+        df = df[['PLAYER_NAME', 'GP', 'MIN']].copy()
+        df['norm_name'] = df['PLAYER_NAME'].apply(normalize_name)
+        return df
+    except Exception as e:
+        print("nba_api error:", e)
+        return None
+
+def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nba_df):
     """Tek oyuncuyu işler, pozisyon / GP / MPG bug’lerini burada çözüyoruz."""
     try:
         def v(x): 
@@ -115,8 +164,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
 
         name = meta['name']
         
-        # --- POZİSYON FİX (DAHA KARARLI VE GERÇEK) ---
-        # Önce display_position, yoksa eligible_positions kullan
+        # --- POZİSYON (GERÇEK / SABİT) ---
         raw_pos = meta.get('display_position') or meta.get('eligible_positions') or ''
         if isinstance(raw_pos, list):
             pos_list = [str(p).strip() for p in raw_pos if p]
@@ -126,29 +174,47 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
         if len(pos_list) == 0:
             final_pos = 'UTL'
         elif len(pos_list) == 1:
-            final_pos = pos_list[0]              # Örn: "PG"
+            final_pos = pos_list[0]
         else:
             final_pos = "/".join(pos_list[:2])   # Örn: "PG/SG", "SF/PF"
 
-        # --- GP ve MPG (Dayanıklı hesaplama) ---
-        # GP için birden fazla key dene
+        # --- GP & MPG (ÖNCE NBA, sonra Yahoo fallback) ---
+        # Yahoo fallback:
         gp = v(
             s_total.get('GP')
             or s_total.get('G')
             or s_avg.get('GP')
             or s_avg.get('G')
         )
-
-        # Toplam dakika: Min / MIN
         total_min_raw = s_total.get('Min') or s_total.get('MIN')
         total_min = v(total_min_raw)
 
         if gp > 0 and total_min > 0:
             mpg = round(total_min / gp, 1)
         else:
-            # Sezon ortalamasındaki dakika alanını kullan
             avg_min_raw = s_avg.get('Min') or s_avg.get('MIN')
             mpg = parse_mpg(avg_min_raw)
+
+        # NBA override:
+        if nba_df is not None:
+            nname = normalize_name(name)
+            row = nba_df[nba_df['norm_name'] == nname]
+            if row.empty and len(name.split()) >= 2:
+                # Basit first/last name eşleştirme
+                first, last = name.split()[0], name.split()[-1]
+                tmp = nba_df[
+                    nba_df['PLAYER_NAME'].str.contains(first, case=False, na=False)
+                    & nba_df['PLAYER_NAME'].str.contains(last, case=False, na=False)
+                ]
+                if not tmp.empty:
+                    row = tmp
+            if not row.empty:
+                r0 = row.iloc[0]
+                gp_n = v(r0['GP'])
+                mpg_n = v(r0['MIN'])
+                if gp_n > 0:
+                    gp = int(gp_n)
+                    mpg = float(mpg_n)
 
         # Takım & Fikstür
         y_abbr = meta.get('editorial_team_abbr','').upper()
@@ -163,7 +229,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
         score_season = calc_fp(s_avg)
         score_month = calc_fp(s_m)
         
-        # --- FORM DURUMU (GP ve MPG Kontrollü) ---
+        # --- FORM DURUMU (Artık GP & MPG daha güvenilir) ---
         diff = score_month - score_season
         st_c = meta.get('status','')
         inj = "🟥 "+st_c if st_c in ['INJ','O'] else ("Rx "+st_c if st_c in ['GTD','DTD'] else "✅")
@@ -172,9 +238,9 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
         if "🟥" in inj:
             trend = "🏥 Sakat"
         elif gp < 5 or score_season < 5:
-            trend = "⚠️ Verisiz"   # Çok az maç / veri yok
+            trend = "⚠️ Verisiz"
         elif mpg < 20:
-            trend = "📉 Rotasyon"  # Düşük dakika
+            trend = "📉 Rotasyon"
         else:
             if diff >= 6.5:
                 trend = "🔥 Formda"
@@ -209,7 +275,6 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched):
             'Raw_Stats': s_avg
         })
     except Exception as e:
-        # Sessizce yutmak yerine logla
         print("process_player error:", e)
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -220,6 +285,7 @@ def load_data():
         st.stop()
 
     nba_schedule = get_schedule_espn()
+    nba_df = get_nba_base_stats()  # 🔥 NBA GP & MPG tablosu
 
     try:
         gm = yfa.Game(sc, 'nba')
@@ -239,13 +305,12 @@ def load_data():
                 roster = lg.to_team(t_key).roster()
                 p_ids = [p['player_id'] for p in roster]
                 if p_ids:
-                    # ÜÇLÜ VERİ ÇEKİMİ (GP/MPG garantilemek için)
                     s_avg = lg.player_stats(p_ids, ANALYSIS_TYPE_AVG)
                     s_total = lg.player_stats(p_ids, ANALYSIS_TYPE_TOTAL)
                     try:
                         s_m = lg.player_stats(p_ids, 'lastmonth')
                     except Exception:
-                        s_m = s_avg  # Hata olursa ortalamayı kullan
+                        s_m = s_avg
                     
                     for i, pm in enumerate(roster):
                         if i < len(s_avg):
@@ -260,7 +325,8 @@ def load_data():
                                 teams[t_key]['name'],
                                 "Sahipli",
                                 all_data,
-                                nba_schedule
+                                nba_schedule,
+                                nba_df
                             )
             except Exception as e:
                 print("team loop error:", e)
@@ -290,7 +356,8 @@ def load_data():
                             "🆓 FA",
                             "Free Agent",
                             all_data,
-                            nba_schedule
+                            nba_schedule,
+                            nba_df
                         )
         except Exception as e:
             print("FA loop error:", e)
