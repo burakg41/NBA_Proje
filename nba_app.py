@@ -392,7 +392,7 @@ def get_z_and_trade_val(df, punt):
         df[f'z_{c}'] = -z if c == 'TO' else z
         
     df['Uygunluk_Puanı'] = df[[f'z_{c}' for c in act]].sum(axis=1)
-    mask = df['Health'].astype(str).str.contains('🔴|🟠')
+    mask = df['Health'].astype(str).str.contains('🔴|🟠', regex=True, na=False)
     df.loc[mask, 'Uygunluk_Puanı'] *= 0.5
     
     return df, act
@@ -532,9 +532,10 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
+    # 🔧 Sakatları gizle (🔴 + 🟠)
     if hide_inj:
-        inj_mask = df['Health'].astype(str).str.contains("🔴")
-        v_df = df[~inj_mask].copy()
+        inj_mask = df['Health'].astype(str).str.contains("🔴|🟠", regex=True, na=False)
+        v_df = df.loc[~inj_mask].copy()
     else:
         v_df = df.copy()
     
