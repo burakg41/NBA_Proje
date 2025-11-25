@@ -40,7 +40,7 @@ ANALYSIS_TYPE_TOTAL = 'season'
 NBA_SEASON_STRING = "2025-26"
 
 # Cache'i kırmak için versiyon anahtarı
-DATA_VERSION = "v17_trade_ui_weekly_proj"
+DATA_VERSION = "v18_weekly_matchup_tab"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -92,6 +92,7 @@ def authenticate_direct():
 
 @st.cache_data(ttl=3600)
 def get_schedule_espn():
+    """Takım bazlı, 7 günlük toplam maç sayısı."""
     counts = {}
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -109,6 +110,34 @@ def get_schedule_espn():
         return counts
     except Exception:
         return {k: 3 for k in TEAM_MAPPER.values()}
+
+@st.cache_data(ttl=900)
+def get_schedule_espn_by_day():
+    """
+    Önümüzdeki 7 gün için, gün bazlı NBA fikstürü.
+    return: { 'YYYY-MM-DD': { 'BOS': 1, 'LAL': 1, ...}, ... }
+    """
+    result = {}
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        for i in range(7):
+            date_obj = datetime.now().date() + timedelta(days=i)
+            key_day = date_obj.strftime('%Y-%m-%d')
+            key_api = date_obj.strftime('%Y%m%d')
+            result[key_day] = {}
+            u = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={key_api}"
+            r = requests.get(u, headers=headers, timeout=2)
+            if r.status_code == 200:
+                for e in r.json().get('events', []):
+                    for c in e.get('competitions', []):
+                        for comp in c.get('competitors', []):
+                            abbr = TEAM_MAPPER.get(comp['team']['abbreviation'], comp['team']['abbreviation'])
+                            result[key_day][abbr] = result[key_day].get(abbr, 0) + 1
+            time.sleep(0.05)
+        return result
+    except Exception:
+        # Hata durumunda hiç maç yok gibi davran
+        return {}
 
 @st.cache_data(ttl=3600)
 def get_nba_base_stats():
@@ -155,7 +184,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
 
         name = meta['name']
         
-        # Pozisyon
+        # Pozisyon: Yahoo'dan gelen eligible_positions vs display_position
         raw_pos = meta.get('display_position') or meta.get('eligible_positions') or ''
         if isinstance(raw_pos, list):
             pos_list = [str(p).strip() for p in raw_pos if p]
@@ -233,7 +262,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         else:
             inj = "🟢 Sağlıklı"
 
-        # Form (yeni, daha zor eşikler)
+        # Form (eşikleri zorlaştırılmış)
         if "🔴" in inj:
             trend = "🔴 Sakat"
         else:
@@ -517,6 +546,78 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
     return result_dfs
 
 # ==========================================
+# HAFTALIK EŞLEŞME PROJEKSİYONU
+# ==========================================
+def project_team_week(team_df: pd.DataFrame, sched_by_day: dict):
+    """
+    Takım (dataframe) + gün bazlı fikstürden:
+    - Günlük maç sayısı
+    - Günlük ve haftalık tahmini FP ve temel kategoriler
+    Sakat oyuncular (🔴 Sakat) otomatik dışarıda bırakılır.
+    """
+    # Sakat olmayan oyuncular
+    active = team_df[~team_df['Health'].astype(str).str.contains("Sakat", na=False)].copy()
+    if active.empty:
+        # hiç sağlıklı oyuncu yoksa sıfırlar dön
+        today = datetime.now().date()
+        days = [today + timedelta(days=i) for i in range(7)]
+        daily_rows = [{
+            'Tarih': d.strftime('%d.%m.%Y'),
+            'Maç_Sayısı_Sen': 0,
+            'Proj_FP_Sen': 0.0
+        } for d in days]
+        weekly = {
+            'games': 0,
+            'fp': 0.0,
+            'cats': {c: 0.0 for c in ['3PTM','PTS','REB','AST','ST','BLK','TO']}
+        }
+        return daily_rows, weekly
+
+    today = datetime.now().date()
+    days = [today + timedelta(days=i) for i in range(7)]
+    day_keys = [d.strftime('%Y-%m-%d') for d in days]
+
+    proj_cats = ['3PTM','PTS','REB','AST','ST','BLK','TO']
+    daily_rows = []
+
+    for d_obj, d_key in zip(days, day_keys):
+        team_sched = sched_by_day.get(d_key, {})
+        games_today = 0
+        cat_vals = {c: 0.0 for c in proj_cats}
+        fp = 0.0
+
+        for _, row in active.iterrows():
+            tm = row['Real_Team']
+            g_cnt = team_sched.get(tm, 0)
+            if g_cnt <= 0:
+                continue
+            games_today += g_cnt
+            # per-game istatistikleri * maç sayısı
+            for c in proj_cats:
+                cat_vals[c] += float(row[c]) * g_cnt
+            fp += float(row['Skor']) * g_cnt
+
+        daily_rows.append({
+            'Tarih': d_obj.strftime('%d.%m.%Y'),
+            'Maç_Sayısı_Sen': int(games_today),
+            'Proj_FP_Sen': float(fp),
+            **{f"{c}_Sen": float(cat_vals[c]) for c in proj_cats}
+        })
+
+    week_games = sum(r['Maç_Sayısı_Sen'] for r in daily_rows)
+    week_fp = sum(r['Proj_FP_Sen'] for r in daily_rows)
+    week_cats = {
+        c: sum(r[f"{c}_Sen"] for r in daily_rows) for c in proj_cats
+    }
+
+    weekly = {
+        'games': int(week_games),
+        'fp': float(week_fp),
+        'cats': week_cats
+    }
+    return daily_rows, weekly
+
+# ==========================================
 # APP UI
 # ==========================================
 st.title("🏀 Burak's GM Dashboard v15.0")
@@ -536,7 +637,7 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
-    # 🔧 Sakat + Riskli oyuncuları gizle
+    # 🔧 Sakat + Riskli oyuncuları gizle (Kadro & Takas görünümü için)
     if hide_inj:
         inj_mask = df['Health'].astype(str).str.contains("Sakat|Riskli", regex=True, na=False)
         v_df = df.loc[~inj_mask].copy()
@@ -646,15 +747,9 @@ if df is not None and not df.empty:
     
     # -------------------------- Rakip Analizi --------------------------
     with t3:
-        st.subheader("Rakip Karşılaştırma – Sezon ve Haftalık Projeksiyon")
+        st.subheader("Rakip Karşılaştırma – Sezon, Haftalık Projeksiyon ve Eşleşme Analizi")
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op_a = st.selectbox("Rakip Takım Seç", ops)
-        
-        view_mode = st.radio(
-            "Görünüm",
-            ["Sezon Ortalamaları", "Haftalık Projeksiyon (Takvim + Sezon Ortalaması)"],
-            horizontal=True
-        )
         
         if op_a:
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
@@ -665,8 +760,15 @@ if df is not None and not df.empty:
             # Sezon ortalamaları
             my_season = my_team_df[cats].mean()
             opp_season = opp_team_df[cats].mean()
-            
-            if view_mode == "Sezon Ortalamaları":
+
+            tab_season, tab_weekly, tab_matchup = st.tabs([
+                "Sezon Ortalamaları",
+                "Haftalık Projeksiyon (Takvim + Sezon Ortalaması)",
+                "Haftalık Eşleşme Analizi"
+            ])
+
+            # ---- Sezon Ortalamaları ----
+            with tab_season:
                 data = []
                 sm, so = 0, 0
                 for c in cats:
@@ -684,9 +786,9 @@ if df is not None and not df.empty:
                 c1, c2 = st.columns(2)
                 c1.metric("Kategori Skoru (Sezon)", f"{sm} - {so}")
                 st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
-            
-            else:
-                # Haftalık projeksiyon: sayılabilir istatistikler için PPG * Games_Next_7D
+
+            # ---- Haftalık Projeksiyon ----
+            with tab_weekly:
                 proj_cats = ['3PTM','PTS','REB','AST','ST','BLK','TO']
                 my_proj = {}
                 opp_proj = {}
@@ -695,14 +797,12 @@ if df is not None and not df.empty:
                     my_proj[c] = float((my_team_df[c] * my_team_df['Games_Next_7D']).sum())
                     opp_proj[c] = float((opp_team_df[c] * opp_team_df['Games_Next_7D']).sum())
                 
-                # FG% ve FT% için sezon ortalamasını gösterelim (haftalık veri ile anlamlı birleştiremiyoruz)
                 data = []
                 sm, so = 0, 0
                 for c in cats:
                     if c in proj_cats:
                         my_val = my_proj[c]
                         opp_val = opp_proj[c]
-                        # TO düşük olması iyi
                         w = (my_val < opp_val) if c == 'TO' else (my_val > opp_val)
                     else:
                         my_val = my_season[c]
@@ -720,7 +820,6 @@ if df is not None and not df.empty:
                         'Durum': "✅ Üstünsün" if w else "❌ Geri"
                     })
                 
-                # Haftalık maç sayısı ve fantezi puanı projeksiyonu
                 my_week_games = int(my_team_df['Games_Next_7D'].sum())
                 opp_week_games = int(opp_team_df['Games_Next_7D'].sum())
                 my_week_fp = float((my_team_df['Skor'] * my_team_df['Games_Next_7D']).sum())
@@ -732,3 +831,64 @@ if df is not None and not df.empty:
                 c3.metric("Haftalık Fantezi Puanı Projeksiyonu", f"{my_week_fp:.0f} / {opp_week_fp:.0f}")
                 
                 st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+
+            # ---- Haftalık Eşleşme Analizi (günlük + haftalık, sakatlar düşülmüş) ----
+            with tab_matchup:
+                st.caption("Bu sekmede, seçtiğin rakibe karşı önümüzdeki 7 gün için maç sayıları ve tahmini üretim; 🔴 Sakat oyuncuların maçları düşülerek hesaplanır.")
+
+                sched_by_day = get_schedule_espn_by_day()
+
+                # Sen
+                my_daily_rows, my_weekly = project_team_week(my_team_df, sched_by_day)
+                # Rakip
+                opp_daily_rows, opp_weekly = project_team_week(opp_team_df, sched_by_day)
+
+                # Günlük özet tabloyu birleştir
+                proj_cats = ['3PTM','PTS','REB','AST','ST','BLK','TO']
+                rows = []
+                for my_row, opp_row in zip(my_daily_rows, opp_daily_rows):
+                    row = {
+                        'Tarih': my_row['Tarih'],
+                        'Sen Maç': my_row['Maç_Sayısı_Sen'],
+                        'Rakip Maç': opp_row['Maç_Sayısı_Sen'],
+                        'Sen FP': my_row['Proj_FP_Sen'],
+                        'Rakip FP': opp_row['Proj_FP_Sen'],
+                    }
+                    for c in proj_cats:
+                        row[f"{c} Sen"] = my_row.get(f"{c}_Sen", 0.0)
+                        row[f"{c} Rakip"] = opp_row.get(f"{c}_Sen", 0.0)
+                    rows.append(row)
+
+                daily_df = pd.DataFrame(rows)
+
+                # Haftalık özet metrikler
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Toplam Potansiyel Maç (Sağlıklı Oyuncular)", f"{my_weekly['games']} / {opp_weekly['games']}")
+                c2.metric("Haftalık FP Projeksiyonu (Sağlıklı Oyuncular)", f"{my_weekly['fp']:.0f} / {opp_weekly['fp']:.0f}")
+                
+                # Kategorilere göre haftalık toplam
+                diff_win = 0
+                diff_lose = 0
+                cat_rows = []
+                for c in proj_cats:
+                    my_val = my_weekly['cats'][c]
+                    opp_val = opp_weekly['cats'][c]
+                    w = (my_val < opp_val) if c == 'TO' else (my_val > opp_val)
+                    if w:
+                        diff_win += 1
+                    else:
+                        diff_lose += 1
+                    cat_rows.append({
+                        "Kategori": c,
+                        "Sen (Hafta)": f"{my_val:.1f}",
+                        "Rakip (Hafta)": f"{opp_val:.1f}",
+                        "Durum": "✅ Üstünsün" if w else "❌ Geri"
+                    })
+
+                c3.metric("Haftalık Eşleşme Kategori Skoru", f"{diff_win} - {diff_lose}")
+
+                st.markdown("#### Günlük Maç & FP Projeksiyonu (Sakatlar Hariç)")
+                st.dataframe(daily_df, use_container_width=True, hide_index=True)
+
+                st.markdown("#### Kategori Bazlı Haftalık Projeksiyon (Sakatlar Hariç)")
+                st.dataframe(pd.DataFrame(cat_rows), use_container_width=True, hide_index=True)
