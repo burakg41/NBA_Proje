@@ -548,6 +548,7 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
 def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week: int | None = None):
     """
     Yahoo Fantasy'den o haftanın gerçekleşmiş matchup istatistiklerini çeker.
+    Takımları isimle değil, team_id ile eşleştirir.
     Dönen yapı:
     {
       'week': week_no,
@@ -556,12 +557,134 @@ def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week
     }
     """
     try:
+        # --- 1) Hangi hafta? ---
         if week is None:
             try:
                 week = lg.current_week()
             except Exception:
                 st.warning("Mevcut hafta bilgisi alınamadı (lg.current_week).")
                 return None
+
+        # --- 2) Stat ID -> display name map ---
+        cats_meta = lg.stat_categories()
+        stat_map = {}
+        for st_meta in cats_meta.get('stats', []):
+            sid = str(st_meta.get('stat_id'))
+            dname = st_meta.get('display_name') or st_meta.get('name')
+            stat_map[sid] = dname
+
+        desired_labels = {'FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'}
+
+        # --- 3) Lig takımlarından isim -> team_id map'i çıkar ---
+        league_teams = lg.teams()  # dict: team_key -> info
+        name_to_id = {}
+        for _, info in league_teams.items():
+            nm = normalize_team_name(info.get("name"))
+            # team_id doğrudan varsa onu, yoksa team_key'den çek
+            tid = info.get("team_id")
+            if tid is None:
+                tkey = info.get("team_key", "")
+                # team_key: "123.l.4567.t.9" gibi -> son kısım team id
+                if ".t." in tkey:
+                    tid = tkey.split(".t.")[-1]
+            if tid is not None:
+                name_to_id[nm] = str(tid)
+
+        my_norm = normalize_team_name(my_team_name)
+        opp_norm = normalize_team_name(opp_team_name)
+
+        my_id = name_to_id.get(my_norm)
+        opp_id = name_to_id.get(opp_norm)
+
+        if my_id is None or opp_id is None:
+            st.warning(
+                f"Takım ID eşleşmesi bulunamadı. (my_id={my_id}, opp_id={opp_id}) "
+                "Lig takım isimleri ile dashboard takım isimleri birebir aynı mı kontrol et."
+            )
+            return None
+
+        # --- 4) Yardımcı fonksiyonlar ---
+        def extract_team_name(tdict):
+            return (tdict.get('name') or
+                    tdict.get('team_name') or
+                    tdict.get('nickname') or
+                    str(tdict.get('team_id')))
+
+        def extract_team_id(tdict):
+            tid = tdict.get('team_id')
+            if tid is None:
+                tkey = tdict.get('team_key')
+                if tkey and ".t." in str(tkey):
+                    tid = str(tkey).split(".t.")[-1]
+            return str(tid) if tid is not None else None
+
+        def extract_stats(tdict):
+            # Yahoo dict içinde: 'team_stats': {'stats': [{stat_id, value}, ...]}
+            s_container = tdict.get('team_stats') or tdict.get('stats') or {}
+            if isinstance(s_container, dict):
+                stats_list = s_container.get('stats', [])
+            else:
+                stats_list = s_container
+            result = {}
+            if not isinstance(stats_list, list):
+                return result
+            for st in stats_list:
+                sid = str(st.get('stat_id'))
+                val = st.get('value')
+                label = stat_map.get(sid)
+                if label in desired_labels:
+                    result[label] = val
+            return result
+
+        # --- 5) İlgili haftanın tüm matchuplarını al ---
+        matchups = lg.matchups(week)
+
+        for mu in matchups:
+            teams_obj = mu.get('teams') or mu.get('team')
+            if isinstance(teams_obj, dict) and 'team' in teams_obj:
+                tlist = teams_obj['team']
+            else:
+                tlist = teams_obj
+
+            if not isinstance(tlist, list) or len(tlist) != 2:
+                continue
+
+            t_a, t_b = tlist[0], tlist[1]
+            id_a = extract_team_id(t_a)
+            id_b = extract_team_id(t_b)
+
+            if id_a is None or id_b is None:
+                continue
+
+            # Bu matchup bizim mi?
+            if {id_a, id_b} != {my_id, opp_id}:
+                continue
+
+            # Evet: hangi taraf benim, hangi taraf rakip?
+            if id_a == my_id:
+                my_t, opp_t = t_a, t_b
+            else:
+                my_t, opp_t = t_b, t_a
+
+            my_name_final = normalize_team_name(extract_team_name(my_t))
+            opp_name_final = normalize_team_name(extract_team_name(opp_t))
+
+            my_stats = extract_stats(my_t)
+            opp_stats = extract_stats(opp_t)
+
+            return {
+                'week': week,
+                'my':  {'team_name': my_name_final,  'stats': my_stats},
+                'opp': {'team_name': opp_name_final, 'stats': opp_stats}
+            }
+
+        # Buraya gelindiyse ilgili iki takımı içeren matchup bulunamadı
+        return None
+
+    except Exception as e:
+        print("weekly totals error:", e)
+        return None
+
 
         # Stat ID -> display name map
         cats_meta = lg.stat_categories()
@@ -1096,3 +1219,4 @@ if df is not None and not df.empty:
                     )
                     yahoo_df = pd.DataFrame(table_rows)
                     st.dataframe(yahoo_df, use_container_width=True, hide_index=True)
+
