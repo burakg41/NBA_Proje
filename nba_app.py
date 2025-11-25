@@ -20,7 +20,7 @@ except ImportError:
 # 🚨 TOKEN ALANI (DOLU VE HAZIR)
 # ==========================================
 MANUAL_TOKEN_DATA = {
-    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
+    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
     "consumer_key": "dj0yJmk9SnRUd2xhMzcwWThNJmQ9WVdrOWRHOXlkR1ZaVjJrbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTY5",
     "consumer_secret": "fed1b9a1af2b7d978917ed0d7401578e61ad29f8",
     "refresh_token": "AJ5rJGl_.0az6KK_IHrVgXaM8K.G~001~gz6NHZIiOKCi8PAws78as.8AqODjiPk-",
@@ -60,14 +60,11 @@ def normalize_name(name: str) -> str:
     if not name:
         return ""
     n = name.upper()
-    # Nokta, apostrof vs temizle
     for ch in [".", "'", "`"]:
         n = n.replace(ch, "")
-    # JR, SR, III, II, IV gibi son ekleri at
     for suf in [" JR", " SR", " III", " II", " IV"]:
         if n.endswith(suf):
             n = n[: -len(suf)]
-    # Çift boşluk temizle
     n = " ".join(n.split())
     return n
 
@@ -113,7 +110,6 @@ def get_schedule_espn():
             time.sleep(0.05)
         return counts
     except Exception:
-        # Hata olursa herkese default 3 maç ver
         return {k: 3 for k in TEAM_MAPPER.values()}
 
 @st.cache_data(ttl=3600)
@@ -139,7 +135,7 @@ def get_nba_base_stats():
         return None
 
 def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nba_df):
-    """Tek oyuncuyu işler, pozisyon / GP / MPG bug’lerini burada çözüyoruz."""
+    """Tek oyuncuyu işler, pozisyon / GP / MPG / Trend sınıflandırması burada."""
     try:
         def v(x): 
             if x in ['-', None]:
@@ -149,7 +145,6 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
             except Exception:
                 return 0.0
         
-        # "32:15" -> 32.25 formatına çevirici
         def parse_mpg(val):
             if not val or val == '-':
                 return 0.0
@@ -164,7 +159,7 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
 
         name = meta['name']
         
-        # --- POZİSYON (GERÇEK / SABİT) ---
+        # --- POZİSYON ---
         raw_pos = meta.get('display_position') or meta.get('eligible_positions') or ''
         if isinstance(raw_pos, list):
             pos_list = [str(p).strip() for p in raw_pos if p]
@@ -176,10 +171,9 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         elif len(pos_list) == 1:
             final_pos = pos_list[0]
         else:
-            final_pos = "/".join(pos_list[:2])   # Örn: "PG/SG", "SF/PF"
+            final_pos = "/".join(pos_list[:2])
 
-        # --- GP & MPG (ÖNCE NBA, sonra Yahoo fallback) ---
-        # Yahoo fallback:
+        # --- GP & MPG (Önce Yahoo, sonra NBA override) ---
         gp = v(
             s_total.get('GP')
             or s_total.get('G')
@@ -195,12 +189,11 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
             avg_min_raw = s_avg.get('Min') or s_avg.get('MIN')
             mpg = parse_mpg(avg_min_raw)
 
-        # NBA override:
+        # NBA override
         if nba_df is not None:
             nname = normalize_name(name)
             row = nba_df[nba_df['norm_name'] == nname]
             if row.empty and len(name.split()) >= 2:
-                # Basit first/last name eşleştirme
                 first, last = name.split()[0], name.split()[-1]
                 tmp = nba_df[
                     nba_df['PLAYER_NAME'].str.contains(first, case=False, na=False)
@@ -223,33 +216,45 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         
         # --- SKOR (Verimlilik Puanı) ---
         def calc_fp(stats):
-            return (v(stats.get('PTS')) + v(stats.get('REB'))*1.2 + v(stats.get('AST'))*1.5 + 
-                    v(stats.get('ST'))*3.0 + v(stats.get('BLK'))*3.0 - v(stats.get('TO')))
+            return (
+                v(stats.get('PTS')) +
+                v(stats.get('REB')) * 1.2 +
+                v(stats.get('AST')) * 1.5 +
+                v(stats.get('ST')) * 3.0 +
+                v(stats.get('BLK')) * 3.0 -
+                v(stats.get('TO'))
+            )
         
         score_season = calc_fp(s_avg)
         score_month = calc_fp(s_m)
         
-        # --- FORM DURUMU (Artık GP & MPG daha güvenilir) ---
-        diff = score_month - score_season
+        # --- FORM DURUMU (YENİ MANTIK) ---
         st_c = meta.get('status','')
-        inj = "🟥 "+st_c if st_c in ['INJ','O'] else ("Rx "+st_c if st_c in ['GTD','DTD'] else "✅")
-        
-        trend = "➖ Nötr"
+        inj = "🟥 " + st_c if st_c in ['INJ','O'] else ("Rx " + st_c if st_c in ['GTD','DTD'] else "✅")
+
+        # Diff'i yine hesaplayalım, ileride kullanmak isteyebilirsin
+        diff = score_month - score_season
+
+        # Önce temel güvenlik kontrolleri
         if "🟥" in inj:
             trend = "🏥 Sakat"
         elif gp < 5 or score_season < 5:
             trend = "⚠️ Verisiz"
-        elif mpg < 20:
-            trend = "📉 Rotasyon"
         else:
-            if diff >= 6.5:
-                trend = "🔥 Formda"
-            elif diff >= 2.5:
+            # 1) YÜKSELİŞTE KURALIN (MPG > 18 ve Skor > 20)
+            if (mpg > 18) and (score_season > 20):
                 trend = "↗️ Yükselişte"
-            elif diff <= -3.0:
-                trend = "🥶 Düşüşte"
             else:
-                trend = "➖ Nötr"
+                # 2) DAKİKA BANTLARI
+                if 24 >= mpg >= 18:
+                    trend = "🔁 Rotasyon Oyuncusu"
+                elif 18 > mpg >= 10:
+                    trend = "🧱 Az Oynayan"
+                elif 10 > mpg > 0:
+                    trend = "🧊 Nadir Oynayan"
+                else:
+                    # Çok düşük dakika / hiç oynamayan
+                    trend = "➖ Nötr"
 
         d_list.append({
             'Player': name,
@@ -285,7 +290,7 @@ def load_data():
         st.stop()
 
     nba_schedule = get_schedule_espn()
-    nba_df = get_nba_base_stats()  # 🔥 NBA GP & MPG tablosu
+    nba_df = get_nba_base_stats()
 
     try:
         gm = yfa.Game(sc, 'nba')
