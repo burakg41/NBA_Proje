@@ -11,7 +11,7 @@ import itertools
 from datetime import datetime, timedelta
 
 # ==========================================
-# 🚨 TOKEN ALANI (SENİN VERİLERİNLE DOLU)
+# 🚨 TOKEN ALANI (DOLU VE HAZIR)
 # ==========================================
 MANUAL_TOKEN_DATA = {
     "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
@@ -30,7 +30,7 @@ TARGET_LEAGUE_ID = "61142"
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM v11.1", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM v12.1", layout="wide", page_icon="🏀")
 
 # Takım Eşleştirme
 TEAM_MAPPER = {
@@ -48,44 +48,48 @@ TEAM_MAPPER = {
 # ==========================================
 
 def authenticate_direct():
-    """Manuel Token ile Giriş"""
+    if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
+        st.error("🚨 Token hatası! Kodun üstünü kontrol edin.")
+        st.stop()
     try:
-        # Token verisi doğrudan kodun içinden alınıyor, dosya aramıyor.
         with open('temp_auth.json', 'w') as f: json.dump(MANUAL_TOKEN_DATA, f)
         sc = OAuth2(None, None, from_file='temp_auth.json')
-        
-        # Token süresi dolmuşsa yenile
         if not sc.token_is_valid():
             try: sc.refresh_access_token()
             except: pass
         return sc
-    except Exception as e: 
-        st.error(f"Auth Hatası: {e}")
-        return None
+    except Exception as e: st.error(f"Auth Hatası: {e}"); return None
 
 @st.cache_data(ttl=3600)
 def get_schedule_espn():
-    """ESPN API Fikstür (Hızlı ve Güvenilir)"""
+    """ESPN API (Alternatif Endpoint)"""
     counts = {}
     try:
+        # CDN Endpoint (Daha Hızlıdır)
+        base_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
         headers = {'User-Agent': 'Mozilla/5.0'}
+        
         for i in range(7):
             d = (datetime.now() + timedelta(days=i)).strftime('%Y%m%d')
-            u = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={d}"
-            r = requests.get(u, headers=headers, timeout=2)
+            r = requests.get(f"{base_url}?dates={d}", headers=headers, timeout=2)
+            
             if r.status_code == 200:
-                for e in r.json().get('events', []):
-                    for c in e.get('competitions', []):
-                        for comp in c.get('competitors', []):
-                            abbr = TEAM_MAPPER.get(comp['team']['abbreviation'], comp['team']['abbreviation'])
-                            counts[abbr] = counts.get(abbr, 0) + 1
+                data = r.json()
+                for ev in data.get('events', []):
+                    for comp in ev.get('competitions', []):
+                        for c in comp.get('competitors', []):
+                            abbr = c['team']['abbreviation']
+                            std = TEAM_MAPPER.get(abbr, abbr)
+                            counts[std] = counts.get(std, 0) + 1
             time.sleep(0.05)
+            
         return counts
-    except: return {k: 3 for k in TEAM_MAPPER.values()} 
+    except: 
+        return {k: 3 for k in TEAM_MAPPER.values()}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
-    st.caption("Sistem Başlatılıyor...")
+    st.caption("Veriler işleniyor...")
     sc = authenticate_direct()
     if not sc: st.stop()
 
@@ -100,7 +104,7 @@ def load_data():
         teams = lg.teams()
         all_data = []
         
-        prog = st.progress(0, text="Veriler İndiriliyor...")
+        prog = st.progress(0, text="Takımlar Taranıyor...")
         
         for idx, t_key in enumerate(teams.keys()):
             try:
@@ -118,7 +122,7 @@ def load_data():
             except: pass
             prog.progress((idx + 1) / (len(teams) + 2))
             
-        # Free Agents (Limitli 80)
+        # Free Agents
         try:
             fa_p = lg.free_agents(None)[:80]
             fa_ids = [p['player_id'] for p in fa_p]
@@ -147,14 +151,14 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
 
         name = meta['name']
         
-        # --- POZİSYON FİX ---
-        raw_pos = meta.get('display_position')
-        if not raw_pos: raw_pos = meta.get('position_type', 'Flex')
+        # --- POZİSYON FİX (KESİN ÇÖZÜM) ---
+        raw_pos = meta.get('display_position', '')
         if isinstance(raw_pos, list): raw_pos = ",".join(raw_pos)
-        
+        if not raw_pos: raw_pos = meta.get('position_type', 'F')
+
         u_pos = set(raw_pos.replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F').split(','))
         order = {'G':1, 'F':2, 'C':3}
-        pos = "/".join(sorted(list(u_pos), key=lambda x: order.get(x, 9)))
+        pos = "/".join(sorted([p for p in list(u_pos) if p], key=lambda x: order.get(x, 9)))
 
         # Takım & Fikstür
         y_abbr = meta.get('editorial_team_abbr','').upper()
@@ -164,7 +168,7 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         # --- GP FİX ---
         gp = v(s_s.get('GP'))
         
-        # --- SKOR (Verimlilik Puanı) ---
+        # --- SKOR (Verimlilik) ---
         def calc_fp(stats):
             return (v(stats.get('PTS')) + 
                     v(stats.get('REB'))*1.2 + 
@@ -176,7 +180,7 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         score_season = calc_fp(s_s)
         score_month = calc_fp(s_m)
         
-        # --- FORM DURUMU (İstenen Aralıklar) ---
+        # --- FORM DURUMU (GP BAĞIMSIZ) ---
         diff = score_month - score_season
         
         st_c = meta.get('status','')
@@ -185,12 +189,12 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
         trend = "➖ Nötr"
         if "🟥" in inj:
             trend = "🏥 Sakat"
-        elif gp < 2: 
+        elif score_season < 5: 
             trend = "⚠️ Verisiz"
         else:
             if diff >= 6.5: trend = "🔥 Formda"
             elif diff >= 2.5: trend = "↗️ Yükselişte"
-            elif diff <= -3.0: trend = "🥶 Formda Değil"
+            elif diff <= -3.0: trend = "🥶 Düşüşte"
             else: trend = "➖ Nötr"
 
         d_list.append({
@@ -203,7 +207,7 @@ def process_player(meta, s_s, s_m, t_name, owner, d_list, n_sched):
             '3PTM': v(s_s.get('3PTM')), 'PTS': v(s_s.get('PTS')),
             'REB': v(s_s.get('REB')), 'AST': v(s_s.get('AST')), 'ST': v(s_s.get('ST')),
             'BLK': v(s_s.get('BLK')), 'TO': v(s_s.get('TO')),
-            'Raw_Stats': s_s 
+            'Raw_Stats': s_s # Trade için ham veri
         })
     except Exception as e: print(e)
 
@@ -223,7 +227,10 @@ def get_z_and_trade_val(df, punt):
         z = (df[c]-m)/(s if s!=0 else 1)
         df[f'z_{c}'] = -z if c=='TO' else z
         
+    # Trade Value = Z-Score Toplamı
     df['Trade_Value'] = df[[f'z_{c}' for c in act]].sum(axis=1)
+    
+    # Sakatlık Cezası
     mask = df['Health'].str.contains('🟥|Rx')
     df.loc[mask, 'Trade_Value'] *= 0.5
     
@@ -305,9 +312,9 @@ def analyze_trade_scenario(give, recv, my_needs):
     return None
 
 # ==========================================
-# APP
+# APP UI
 # ==========================================
-st.title("🏀 Burak's GM Dashboard v11.1 (Final Fix)")
+st.title("🏀 Burak's GM Dashboard v12.1")
 
 with st.sidebar:
     if st.button("Yenile"): st.cache_data.clear(); st.rerun()
@@ -333,7 +340,15 @@ if df is not None and not df.empty:
     with t1:
         tm = st.selectbox("Takım", [MY_TEAM_NAME]+sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME]))
         show = v_df[v_df['Team']==tm].sort_values('Skor', ascending=False)
-        st.dataframe(show[['Player','Pos','Games_Next_7D','Trend','Health','Skor','GP','FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], use_container_width=True, hide_index=True)
+        st.dataframe(
+            show[['Player','Pos','Games_Next_7D','Trend','Health','Skor','GP','FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], 
+            column_config={
+                "Skor": st.column_config.ProgressColumn("Verimlilik", format="%.1f", min_value=0, max_value=60),
+                "Trend": st.column_config.TextColumn("Form Durumu")
+            },
+            use_container_width=True, 
+            hide_index=True
+        )
         
     with t2:
         ops = sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME and t!="Free Agent"])
