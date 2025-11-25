@@ -6,664 +6,437 @@ import numpy as np
 import os
 import json
 import time
+import requests
 import plotly.express as px
-import itertools
+import itertools 
 from datetime import datetime, timedelta
-import concurrent.futures  # PARALEL İŞLEM İÇİN KRİTİK KÜTÜPHANE
+
+# ==========================================
+# AYARLAR & SABİTLER
+# ==========================================
+SEASON_YEAR = 2025  
+NBA_SEASON_STRING = '2025-26' 
+TARGET_LEAGUE_ID = "61142"  
+MY_TEAM_NAME = "Burak's Wizards" 
+ANALYSIS_TYPE = 'average_season' 
+
+st.set_page_config(page_title="Burak's GM Dashboard v9.1", layout="wide", page_icon="🏀")
 
 # --- NBA API ---
-from nba_api.stats.endpoints import leaguedashplayerstats, scoreboardv2
+try:
+    from nba_api.stats.endpoints import leaguedashplayerstats
+    NBA_API_AVAILABLE = True
+except ImportError:
+    NBA_API_AVAILABLE = False
 
-# --- AYARLAR ---
-SEASON_YEAR = 2025
-NBA_SEASON_STRING = "2025-26"
-TARGET_LEAGUE_ID = "61142"
-MY_TEAM_NAME = "Burak's Wizards"
-ANALYSIS_TYPE = "average_season"
-CACHE_FILE = "optimized_data_cache.json"  # Verileri buraya yedekleyeceğiz
-CACHE_DURATION_HOURS = 4  # 4 Saatte bir yenile
-
-st.set_page_config(page_title="Burak's GM Dashboard", layout="wide")
-
-# --- YAN PANEL ---
-with st.sidebar:
-    st.header("⚡ GM Kontrol Paneli")
-    if st.button("🚀 Zorla Yenile (API)"):
-        st.cache_data.clear()
-        if os.path.exists(CACHE_FILE):
-            os.remove(CACHE_FILE)
-        st.rerun()
-
-    st.markdown("---")
-    st.subheader("🎯 Strateji")
-    punt_cats = st.multiselect(
-        "Punt:",
-        ["FG%", "FT%", "3PTM", "PTS", "REB", "AST", "ST", "BLK", "TO"],
-    )
-    st.caption(
-        f"Veri Ömrü: {CACHE_DURATION_HOURS} Saat. Önbellekten okununca hızlanır."
-    )
+# Takım Eşleştirme (Yahoo -> Standart)
+TEAM_MAPPER = {
+    'ATL': 'ATL', 'BOS': 'BOS', 'BKN': 'BKN', 'CHA': 'CHA', 'CHI': 'CHI',
+    'CLE': 'CLE', 'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GS': 'GSW', 'GSW': 'GSW',
+    'HOU': 'HOU', 'IND': 'IND', 'LAC': 'LAC', 'LAL': 'LAL', 'MEM': 'MEM',
+    'MIA': 'MIA', 'MIL': 'MIL', 'MIN': 'MIN', 'NO': 'NOP', 'NOP': 'NOP',
+    'NY': 'NYK', 'NYK': 'NYK', 'OKC': 'OKC', 'ORL': 'ORL', 'PHI': 'PHI', 
+    'PHO': 'PHX', 'PHX': 'PHX', 'POR': 'POR', 'SA': 'SAS', 'SAS': 'SAS', 
+    'SAC': 'SAC', 'TOR': 'TOR', 'UTAH': 'UTA', 'UTA': 'UTA', 'WAS': 'WAS', 'WSH': 'WAS'
+}
 
 # ==========================================
-# 1. YAHOO AUTH HELPER (BASİT ve SAĞLAM)
+# 1. VERİ ÇEKME MOTORU
 # ==========================================
 
-
-def build_yahoo_oauth():
-    """
-    Yahoo OAuth bağlantısını kurar.
-
-    STRATEJİ:
-    1) Eğer geçerli bir oauth2.json varsa → doğrudan kullan.
-    2) Yoksa, st.secrets['yahoo_auth'] içinden SADECE consumer_key / consumer_secret al,
-       yeni bir oauth2.json oluştur ve OAuth2 akışını başlat.
-    """
-
-    # 1) Varolan dosyayı kullanmayı dene
-    if os.path.exists("oauth2.json"):
-        try:
-            return OAuth2(None, None, from_file="oauth2.json")
-        except Exception:
-            # Dosya bozuk / eksik → silip sıfırdan dene
-            try:
-                os.remove("oauth2.json")
-            except OSError:
-                pass  # yoksa problem değil
-
-    # 2) Secrets yoksa net uyarı ver
-    if "yahoo_auth" not in st.secrets:
-        st.error(
-            "Yahoo OAuth bilgileri bulunamadı.\n\n"
-            "Lütfen Streamlit secrets'e `[yahoo_auth]` bölümünde en az "
-            "`consumer_key` ve `consumer_secret` ekle."
-        )
-        return None
-
-    s = dict(st.secrets["yahoo_auth"])
-
-    # 2a) consumer_key ve consumer_secret var mı?
-    if "consumer_key" not in s or "consumer_secret" not in s:
-        st.error(
-            "st.secrets['yahoo_auth'] içinde 'consumer_key' ve/veya "
-            "'consumer_secret' eksik.\n\n"
-            "Örnek yapı:\n\n"
-            "[yahoo_auth]\n"
-            "consumer_key = \"...\"\n"
-            "consumer_secret = \"...\""
-        )
-        return None
-
-    # 2b) Her zaman SADECE ck/cs içeren yeni bir oauth2.json yarat
-    creds = {
-        "consumer_key": s["consumer_key"],
-        "consumer_secret": s["consumer_secret"],
-    }
+@st.cache_data(ttl=3600)
+def get_nba_real_stats():
+    """NBA.com'dan gerçek istatistikleri çeker."""
+    if not NBA_API_AVAILABLE: return {}
     try:
-        with open("oauth2.json", "w") as f:
-            json.dump(creds, f)
-    except Exception as e:
-        st.error(f"oauth2.json yazılırken hata oluştu: {e}")
-        return None
-
-    # 2c) İlk kez OAuth akışını başlat
-    try:
-        oauth = OAuth2(None, None, from_file="oauth2.json")
-        return oauth
-    except Exception as e:
-        st.error(
-            "Yahoo OAuth başlatılırken hata oluştu.\n"
-            f"Ayrıntı: {e}\n\n"
-            "Consumer key/secret değerlerini ve Yahoo app izinlerini kontrol et."
-        )
-        return None
-
-
-# ==========================================
-# 2. OPTİMİZE EDİLMİŞ VERİ ÇEKME MOTORU
-# ==========================================
-
-
-def fetch_nba_schedule():
-    """NBA Fikstürünü çeker (Hafif işlem)"""
-    try:
-        team_game_counts = {}
-        today = datetime.now()
-        # Sadece önümüzdeki 7 güne bakıyoruz, paralel yapmaya gerek yok, hızlıdır.
-        for i in range(7):
-            date_str = (today + timedelta(days=i)).strftime("%m/%d/%Y")
-            board = scoreboardv2.ScoreboardV2(
-                game_date=date_str, timeout=2
-            )  # Timeout ekledik
-            line_score = board.line_score.get_data_frame()
-            if not line_score.empty:
-                playing_teams = line_score["TEAM_ABBREVIATION"].unique()
-                for team in playing_teams:
-                    team_game_counts[team] = team_game_counts.get(team, 0) + 1
-        return team_game_counts
-    except Exception:
-        return {}
-
-
-def fetch_nba_stats():
-    """NBA.com İstatistikleri"""
-    try:
+        custom_headers = {
+            'Host': 'stats.nba.com',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://www.nba.com/',
+            'Connection': 'keep-alive'
+        }
         stats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=NBA_SEASON_STRING, per_mode_detailed="PerGame", timeout=5
+            season=NBA_SEASON_STRING, 
+            per_mode_detailed='PerGame',
+            timeout=45,
+            headers=custom_headers
         )
         df = stats.get_data_frames()[0]
         nba_data = {}
-        for _, row in df.iterrows():
-            clean_name = row["PLAYER_NAME"].lower().replace(".", "").strip()
-            nba_data[clean_name] = {
-                "GP": row["GP"],
-                "MPG": row["MIN"],
-                "TEAM": row["TEAM_ABBREVIATION"],
-            }
+        for index, row in df.iterrows():
+            clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+            nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
         return nba_data
-    except Exception:
+    except Exception as e: 
+        print(f"⚠️ İstatistik API Hatası: {e}")
         return {}
 
+@st.cache_data(ttl=3600)
+def get_schedule_robust():
+    """Fikstür çeker. Başarısız olursa 'Simülasyon Modu' devreye girer."""
+    team_game_counts = {}
+    today = datetime.now()
+    success_days = 0
 
-# --- PARALEL İŞLEM İÇİN YARDIMCI FONKSİYON ---
-def fetch_team_roster_data(team_key, team_name, lg):
-    """Tek bir takımın verisini çeker (Thread içinde çalışacak)"""
     try:
-        roster = lg.to_team(team_key).roster()
-        p_ids = [p["player_id"] for p in roster]
-        if not p_ids:
-            return []
+        for i in range(7):
+            date_str = (today + timedelta(days=i)).strftime('%Y%m%d')
+            url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={date_str}"
+            r = requests.get(url, timeout=3)
+            if r.status_code == 200:
+                data = r.json()
+                for event in data.get('events', []):
+                    for competition in event.get('competitions', []):
+                        for competitor in competition.get('competitors', []):
+                            abbr = competitor['team']['abbreviation']
+                            std_abbr = TEAM_MAPPER.get(abbr, abbr)
+                            team_game_counts[std_abbr] = team_game_counts.get(std_abbr, 0) + 1
+                success_days += 1
+            time.sleep(0.1)
+    except: pass
 
-        # Çift Sorgu (Sezon + Son 1 Ay)
-        stats_s = lg.player_stats(p_ids, ANALYSIS_TYPE)
-        stats_m = lg.player_stats(p_ids, "last_month")
+    if success_days < 3 or len(team_game_counts) < 10:
+        return _simulate_schedule()
+        
+    return team_game_counts
 
-        team_data = []
-        for i, pm in enumerate(roster):
-            # Veriyi işle ve dict olarak döndür (DataFrame değil, daha hızlı)
-            p_data = process_player_raw(pm, stats_s[i], stats_m[i], team_name, "Sahipli")
-            if p_data:
-                team_data.append(p_data)
-        return team_data
-    except Exception:
-        return []
+def _simulate_schedule():
+    """API çalışmazsa her takıma rastgele 3 veya 4 maç atar."""
+    sim_counts = {}
+    for team in TEAM_MAPPER.values():
+        sim_counts[team] = 3 if np.random.rand() > 0.4 else 4
+    return sim_counts
 
+def authenticate_yahoo():
+    """
+    Cloud Uyumlu Kimlik Doğrulama:
+    1. Önce Streamlit Secrets'a bakar (Cloud için).
+    2. Yoksa yerel 'oauth2.json' dosyasına bakar (Local için).
+    """
+    # CLOUD İÇİN: Secrets'tan dosya oluştur
+    if 'yahoo_auth' in st.secrets:
+        try:
+            # Secrets verisini JSON formatına çevirip dosyaya yazıyoruz
+            data = dict(st.secrets['yahoo_auth'])
+            with open('oauth2.json', 'w') as f:
+                json.dump(data, f)
+        except Exception: pass
 
-def fetch_fa_chunk(chunk_ids, chunk_players, lg):
-    """Free Agent parçasını çeker"""
-    try:
-        stats_s = lg.player_stats(chunk_ids, ANALYSIS_TYPE)
-        stats_m = lg.player_stats(chunk_ids, "last_month")
-        chunk_data = []
-        for k, pm in enumerate(chunk_players):
-            p_data = process_player_raw(pm, stats_s[k], stats_m[k], "🆓 FA", "Free Agent")
-            if p_data:
-                chunk_data.append(p_data)
-        return chunk_data
-    except Exception:
-        return []
-
-
-def process_player_raw(meta, stat_s, stat_m, team_name, ownership):
-    """Veriyi ham haliyle işler (NBA verisiyle sonra birleşecek)"""
-    try:
-        def get_val(val):
-            return float(val) if val not in ["-", None] else 0.0
-
-        p_name = meta["name"]
-        st_code = meta.get("status", "")
-        raw_pos = meta.get("display_position", "")
-
-        pts_s, pts_m = get_val(stat_s.get("PTS")), get_val(stat_m.get("PTS"))
-        trend = pts_m - pts_s if pts_m > 0 else 0
-
-        return {
-            "Player": p_name,
-            "Team": team_name,
-            "Yahoo_Team": meta.get("editorial_team_abbr", "N/A").upper(),
-            "Owner_Status": ownership,
-            "Raw_Pos": raw_pos,
-            "Status": st_code,
-            "Trend_Score": trend,
-            "FG%": get_val(stat_s.get("FG%")) * 100,
-            "FT%": get_val(stat_s.get("FT%")) * 100,
-            "3PTM": get_val(stat_s.get("3PTM")),
-            "PTS": pts_s,
-            "REB": get_val(stat_s.get("REB")),
-            "AST": get_val(stat_s.get("AST")),
-            "ST": get_val(stat_s.get("ST")),
-            "BLK": get_val(stat_s.get("BLK")),
-            "TO": get_val(stat_s.get("TO")),
-        }
-    except Exception:
-        return None
-
+    # LOCAL & CLOUD (Dosya oluştuktan sonra):
+    if os.path.exists('oauth2.json'):
+        try:
+            sc = OAuth2(None, None, from_file='oauth2.json')
+            if not sc.token_is_valid():
+                sc.refresh_access_token()
+            return sc
+        except Exception: return None
+    return None
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def master_data_loader():
-    """TÜM SİSTEMİN BEYNİ: Önce diske bakar, yoksa paralel API çağrısı yapar"""
+def load_data():
+    status = st.status("Veriler Yükleniyor...", expanded=True)
+    
+    status.write("📅 Fikstür verisi çekiliyor...")
+    nba_schedule = get_schedule_robust()
+    
+    is_sim = all(v in [3,4] for v in list(nba_schedule.values())[:5])
+    if is_sim: status.warning("⚠️ Canlı fikstür alınamadı. Simülasyon modu aktif.")
+    else: status.write("✅ Canlı fikstür alındı.")
 
-    # 1. DİSK KONTROLÜ (HIZLI BAŞLANGIÇ)
-    if os.path.exists(CACHE_FILE):
-        file_age = time.time() - os.path.getmtime(CACHE_FILE)
-        if file_age < (CACHE_DURATION_HOURS * 3600):
-            st.toast("⚡ Veriler diskten yüklendi (Turbo Mod)", icon="🚀")
-            try:
-                with open(CACHE_FILE, "r") as f:
-                    return pd.DataFrame(json.load(f)), None  # Lig objesi diskten dönmez
-            except Exception:
-                pass  # Hata varsa API'ye geç
-
-    # 2. API BAĞLANTISI (YAHOO OAUTH)
-    sc = build_yahoo_oauth()
-    if sc is None:
-        # build_yahoo_oauth detaylı hata mesajını zaten bastı
+    status.write("📊 İstatistikler güncelleniyor...")
+    nba_stats_dict = get_nba_real_stats()
+    
+    status.write("🔐 Yahoo Fantasy'ye bağlanılıyor...")
+    sc = authenticate_yahoo()
+    if not sc: 
+        status.update(label="Giriş Hatası", state="error")
+        st.error("Kimlik doğrulama başarısız! (Cloud Secrets veya oauth2.json kontrol edin)")
         return None, None
 
     try:
-        if not sc.token_is_valid():
-            sc.refresh_access_token()
-    except Exception as e:
-        st.error(f"Yahoo token yenilenirken hata oluştu: {e}")
-        return None, None
-
-    try:
-        gm = yfa.Game(sc, "nba")
-    except Exception as e:
-        st.error(f"Yahoo Fantasy Game nesnesi oluşturulamadı: {e}")
-        return None, None
-
-    try:
-        lid = next((l for l in gm.league_ids(year=SEASON_YEAR) if TARGET_LEAGUE_ID in l), None)
-        if not lid:
-            st.error("Hedef Yahoo lig ID'si bulunamadı. TARGET_LEAGUE_ID değerini kontrol et.")
+        gm = yfa.Game(sc, 'nba')
+        league_ids = gm.league_ids(year=SEASON_YEAR)
+        target_lid = next((lid for lid in league_ids if TARGET_LEAGUE_ID in lid), None)
+        
+        if not target_lid:
+            status.update(label="Lig Bulunamadı", state="error")
             return None, None
-        lg = gm.to_league(lid)
 
-        # 3. PARALEL VERİ ÇEKME (THREADING)
-        status_text = st.empty()
-        status_text.info("🌐 API'lere Paralel Bağlanılıyor (NBA + Yahoo)...")
+        lg = gm.to_league(target_lid)
+        teams = lg.teams()
+        all_data = []
+        
+        status.write(f"📥 {len(teams)} Takımın kadrosu indiriliyor...")
+        prog = status.progress(0)
+        
+        for idx, team_key in enumerate(teams.keys()):
+            t_name = teams[team_key]['name']
+            try:
+                roster = lg.to_team(team_key).roster()
+                p_ids = [p['player_id'] for p in roster]
+                if p_ids:
+                    stats_s = lg.player_stats(p_ids, ANALYSIS_TYPE)
+                    try: stats_m = lg.player_stats(p_ids, 'lastmonth')
+                    except: stats_m = stats_s 
+                    
+                    for i, pm in enumerate(roster):
+                        if i < len(stats_s):
+                            m_stat = stats_m[i] if i < len(stats_m) else stats_s[i]
+                            process_player(pm, stats_s[i], m_stat, t_name, "Sahipli", all_data, nba_stats_dict, nba_schedule)
+            except: pass
+            prog.progress((idx + 1) / (len(teams) + 1))
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            # A. NBA Verilerini Başlat
-            future_nba = executor.submit(fetch_nba_stats)
-            future_sched = executor.submit(fetch_nba_schedule)
-
-            # B. Yahoo Takımlarını Başlat
-            teams = lg.teams()
-            future_teams = {
-                executor.submit(fetch_team_roster_data, k, v["name"], lg): v["name"]
-                for k, v in teams.items()
-            }
-
-            # C. Yahoo Free Agents
-            fa_players = lg.free_agents(None)[:300]
-            fa_ids = [p["player_id"] for p in fa_players]
-
-            all_raw_data = []
-
-            # Takım Verilerini Topla
-            for future in concurrent.futures.as_completed(future_teams):
-                data = future.result()
-                if data:
-                    all_raw_data.extend(data)
-
-            # FA Verilerini Çek (Chunked)
-            chunk_size = 25
-            for i in range(0, len(fa_ids), chunk_size):
-                chunk_ids = fa_ids[i: i + chunk_size]
-                chunk_players = fa_players[i: i + chunk_size]
-                chunk_data = fetch_fa_chunk(chunk_ids, chunk_players, lg)
-                if chunk_data:
-                    all_raw_data.extend(chunk_data)
-
-            # NBA Sonuçlarını Bekle
-            nba_stats = future_nba.result()
-            nba_sched = future_sched.result()
-
-        # 4. VERİ BİRLEŞTİRME (MERGE)
-        status_text.text("Veriler birleştiriliyor...")
-
-        final_data = []
-        for p in all_raw_data:
-            # İsim Temizliği
-            clean_name = p["Player"].lower().replace(".", "").strip()
-
-            # NBA Verisi Ekle
-            real_gp = nba_stats.get(clean_name, {}).get("GP", 0)
-            real_mpg = nba_stats.get(clean_name, {}).get("MPG", 0.0)
-
-            # Takım Eşleşmesi (Yahoo veya NBA'den)
-            real_team = nba_stats.get(clean_name, {}).get("TEAM", p["Yahoo_Team"])
-            if real_team == "PHO":
-                real_team = "PHX"
-
-            # Fikstür
-            games_next = nba_sched.get(real_team, 0)
-
-            # Görselleştirmeler
-            simple_pos = (
-                p["Raw_Pos"]
-                .replace("PG", "G")
-                .replace("SG", "G")
-                .replace("SF", "F")
-                .replace("PF", "F")
-            )
-            u_pos = sorted(
-                list(set(simple_pos.split(","))),
-                key=lambda x: 1 if x == "G" else (2 if x == "F" else 3),
-            )
-
-            # Trend İkon
-            if p["Trend_Score"] > 3.0:
-                ti = "🔥"
-            elif p["Trend_Score"] > 1.0:
-                ti = "↗️"
-            elif p["Trend_Score"] < -3.0:
-                ti = "🥶"
-            elif p["Trend_Score"] < -1.0:
-                ti = "↘️"
-            else:
-                ti = "➖"
-
-            # Sağlık İkon
-            if p["Status"] in ["INJ", "O"]:
-                hi = f"🟥 {p['Status']}"
-            elif p["Status"] in ["GTD", "DTD"]:
-                hi = f"Rx {p['Status']}"
-            else:
-                hi = "✅"
-
-            p["Pos"] = ",".join(u_pos)
-            p["Health"] = hi
-            p["Trend"] = ti
-            p["GP"] = int(real_gp)
-            p["MPG"] = float(real_mpg)
-            p["Real_Team"] = real_team
-            p["Games_Next_7D"] = int(games_next)
-
-            # Gereksizleri at
-            del p["Raw_Pos"], p["Status"], p["Trend_Score"], p["Yahoo_Team"]
-            final_data.append(p)
-
-        df = pd.DataFrame(final_data)
-
-        # 5. DİSKE YEDEKLE
+        status.write("🆓 Free Agents taranıyor...")
         try:
-            with open(CACHE_FILE, "w") as f:
-                json.dump(final_data, f)
-        except Exception:
-            pass
-
-        status_text.empty()
-        return df, lg
-
+            fa_players = lg.free_agents(None)[:80]
+            fa_ids = [p['player_id'] for p in fa_players]
+            if fa_ids:
+                stats_s = lg.player_stats(fa_ids, ANALYSIS_TYPE)
+                try: stats_m = lg.player_stats(fa_ids, 'lastmonth')
+                except: stats_m = stats_s
+                for k, pm in enumerate(fa_players):
+                    if k < len(stats_s):
+                        m_stat = stats_m[k] if k < len(stats_m) else stats_s[k]
+                        process_player(pm, stats_s[k], m_stat, "🆓 FA", "Free Agent", all_data, nba_stats_dict, nba_schedule)
+        except: pass
+        
+        prog.progress(1.0)
+        status.update(label="Hazır!", state="complete", expanded=False)
+        return pd.DataFrame(all_data), lg
+        
     except Exception as e:
+        status.update(label="Hata", state="error")
         st.error(f"Kritik Hata: {e}")
         return None, None
 
+def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_dict, nba_schedule):
+    try:
+        def val(v):
+            if v == '-' or v is None: return 0.0
+            try: return float(v)
+            except: return 0.0
 
-# ==========================================
-# 3. HESAPLAMA MOTORU
-# ==========================================
+        name = meta['name']
+        
+        raw_pos = meta.get('display_position', '').replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F')
+        pos_set = set(raw_pos.split(','))
+        order = {'G':1, 'F':2, 'C':3}
+        final_pos = "/".join(sorted(list(pos_set), key=lambda x: order.get(x, 9)))
 
+        c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+        real_gp, real_mpg, nba_team = 0, 0.0, "N/A"
+        
+        if c_name in nba_dict:
+            real_gp = nba_dict[c_name]['GP']
+            real_mpg = nba_dict[c_name]['MPG']
+            nba_team = nba_dict[c_name]['TEAM']
+        else:
+            y_abbr = meta.get('editorial_team_abbr', 'N/A').upper()
+            nba_team = TEAM_MAPPER.get(y_abbr, y_abbr)
 
-def perform_calculations(df, punt_list):
-    # Z-Score
-    cats = ["FG%", "FT%", "3PTM", "PTS", "REB", "AST", "ST", "BLK", "TO"]
-    active_cats = [c for c in cats if c not in punt_list]
+        games_7d = nba_schedule.get(nba_team, 0)
+        
+        st_code = meta.get('status', '')
+        is_injured = st_code in ['INJ', 'O', 'GTD', 'DTD']
+        inj_str = f"🟥 {st_code}" if st_code in ['INJ', 'O'] else (f"Rx {st_code}" if is_injured else "✅")
 
+        def f_score(s):
+            return (val(s.get('PTS')) + val(s.get('REB'))*1.2 + val(s.get('AST'))*1.5 + 
+                    val(s.get('ST'))*3 + val(s.get('BLK'))*3 - val(s.get('TO')))
+        
+        fs_s = f_score(stat_s)
+        fs_m = f_score(stat_m)
+        trend = "➖"
+        if is_injured: trend = "🏥"
+        elif abs(fs_s - fs_m) < 0.1: trend = "➖"
+        else:
+            diff = fs_m - fs_s
+            if diff > 5.0: trend = "🔥"
+            elif diff > 2.0: trend = "↗️"
+            elif diff < -5.0: trend = "🥶"
+            elif diff < -2.0: trend = "↘️"
+
+        data_list.append({
+            'Player': name, 'Team': team_name, 'Real_Team': nba_team,
+            'Owner_Status': ownership, 'Pos': final_pos, 'Health': inj_str, 'Trend': trend,
+            'Games_Next_7D': int(games_7d), 'GP': int(real_gp), 'MPG': float(real_mpg),
+            'FG%': val(stat_s.get('FG%'))*100, 'FT%': val(stat_s.get('FT%'))*100, 
+            '3PTM': val(stat_s.get('3PTM')), 'PTS': val(stat_s.get('PTS')), 
+            'REB': val(stat_s.get('REB')), 'AST': val(stat_s.get('AST')), 
+            'ST': val(stat_s.get('ST')), 'BLK': val(stat_s.get('BLK')), 
+            'TO': val(stat_s.get('TO'))
+        })
+    except: pass
+
+def calculate_z_scores(df, punt_list):
+    cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
+    active = [c for c in cats if c not in punt_list]
+    if df.empty: return df, active
+    
     for c in cats:
-        if c in punt_list:
-            df[f"z_{c}"] = 0.0
+        if c in punt_list: 
+            df[f'z_{c}'] = 0.0
             continue
-        if c not in df.columns:
-            df[c] = 0.0
-        mean, std = df[c].mean(), df[c].std()
-        if std == 0:
-            std = 1
-        df[f"z_{c}"] = (mean - df[c]) / std if c == "TO" else (df[c] - mean) / std
+        mean = df[c].mean(); std = df[c].std()
+        if std == 0: std = 1
+        z = (df[c] - mean) / std
+        if c == 'TO': z = -z 
+        df[f'z_{c}'] = z
+        
+    df['Genel_Kalite'] = df[[f'z_{c}' for c in active]].sum(axis=1)
+    return df, active
 
-    df["Genel_Kalite"] = df[[f"z_{c}" for c in active_cats]].sum(axis=1)
-    return df, active_cats
-
-
-def analyze_needs(df, my_team, active_cats):
-    z_cols = [f"z_{c}" for c in active_cats]
-    m_df = df[df["Team"] == my_team]
-    if m_df.empty:
-        return [], []
-    prof = m_df[z_cols].sum().sort_values()
-    return [x.replace("z_", "") for x in prof.head(4).index], [
-        x.replace("z_", "") for x in prof.tail(3).index
-    ]
-
-
-def score_players(df, targets, active_cats):
-    df["Skor"] = 0
+def score_players_weighted(df, targets, active_cats):
+    df['Skor'] = 0.0
     for c in active_cats:
-        if f"z_{c}" in df.columns:
-            w = 3.0 if c in targets else 1.0
-            df["Skor"] += df[f"z_{c}"] * w
-    # Fikstür Etkisi (Streaming için)
-    df["Skor"] += df["Games_Next_7D"].apply(
-        lambda x: 1.0 if x >= 4 else (-0.5 if x <= 2 else 0)
-    )
+        col = f'z_{c}'
+        weight = 1.0
+        if c in targets: weight = 1.5 
+        if col in df.columns: df['Skor'] += df[col] * weight
+            
+    df['Trade_Value'] = df['Skor']
+    mask_injured = df['Health'].str.contains('🟥|Rx')
+    df.loc[mask_injured, 'Trade_Value'] = df.loc[mask_injured, 'Skor'] * 0.5
     return df
 
+def analyze_needs(df, my_team, active_cats):
+    m_df = df[df['Team'].str.strip() == my_team.strip()]
+    if m_df.empty: return [], []
+    z_cols = [f'z_{c}' for c in active_cats]
+    totals = m_df[z_cols].sum().sort_values()
+    return [x.replace('z_', '') for x in totals.head(3).index], [x.replace('z_', '') for x in totals.tail(3).index]
 
-# --- RAKİP ANALİZİ (BASİT) ---
-def get_matchup_prediction(df, my_team, opp_team, cats):
-    my_stats = df[df["Team"] == my_team][cats].mean()
-    opp_stats = df[df["Team"] == opp_team][cats].mean()
-    s_me, s_opp, details = 0, 0, []
-    for c in cats:
-        val_me, val_opp = my_stats[c], opp_stats[c]
-        win = (val_me < val_opp) if c == "TO" else (val_me > val_opp)
-        if win:
-            s_me += 1
-        else:
-            s_opp += 1
-        details.append(
-            {
-                "Kat": c,
-                "Ben": f"{val_me:.1f}",
-                "Rakip": f"{val_opp:.1f}",
-                "Sonuç": "✅" if win else "❌",
-            }
-        )
-    return s_me, s_opp, pd.DataFrame(details)
+def trade_engine_grouped(df, my_team, target_opp, my_needs):
+    safe_me = my_team.strip()
+    safe_opp = target_opp.strip()
+    
+    my_roster = df[df['Team'].str.strip() == safe_me].sort_values(by='Trade_Value', ascending=True)
+    opp_roster = df[df['Team'].str.strip() == safe_opp].sort_values(by='Trade_Value', ascending=False)
+    
+    my_assets = my_roster.head(10) 
+    opp_assets = opp_roster.head(10)
+    
+    groups = {
+        "Küçük (1-2 Oyuncu)": [], "Orta (2-3 Oyuncu)": [], 
+        "Büyük (3-4 Oyuncu)": [], "Devasa (4 Oyuncu)": []
+    }
+    
+    for n_give in range(1, 5):
+        for n_recv in range(1, 5):
+            if abs(n_give - n_recv) > 1: continue
+            
+            total_p = n_give + n_recv
+            if total_p <= 3: g_name = "Küçük (1-2 Oyuncu)"
+            elif total_p <= 5: g_name = "Orta (2-3 Oyuncu)"
+            elif total_p <= 7: g_name = "Büyük (3-4 Oyuncu)"
+            else: g_name = "Devasa (4 Oyuncu)"
+            
+            my_combos = list(itertools.combinations(my_assets.index, n_give))
+            opp_combos = list(itertools.combinations(opp_assets.index, n_recv))
+            
+            if len(my_combos) * len(opp_combos) > 600:
+                my_combos = my_combos[:20]; opp_combos = opp_combos[:20]
+            
+            for m_idx in my_combos:
+                for o_idx in opp_combos:
+                    g_list = [df.loc[i] for i in m_idx]
+                    r_list = [df.loc[i] for i in o_idx]
+                    res = analyze_trade_scenario(g_list, r_list, my_needs)
+                    if res: groups[g_name].append(res)
+    
+    result_dfs = {}
+    for g_name, data in groups.items():
+        if data: result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Puan', ascending=False)
+        else: result_dfs[g_name] = pd.DataFrame()
+    return result_dfs
 
+def analyze_trade_scenario(give, recv, my_needs):
+    val_give = sum([p['Trade_Value'] for p in give])
+    val_recv = sum([p['Trade_Value'] for p in recv])
+    slot_adv = (len(give) - len(recv)) * 0.8
+    net_diff = val_recv - val_give + slot_adv
+    
+    if net_diff > 0.5 and (val_give - val_recv) > -4.0:
+        needs_met = []
+        for p in recv:
+            for cat in my_needs:
+                if p.get(f'z_{cat}', 0) > 0.5: needs_met.append(cat)
+        needs_met = list(set(needs_met))
+        strategic_score = net_diff + (len(needs_met) * 1.5)
+        
+        has_injured = any(["🟥" in p['Health'] for p in recv])
+        warn = "⚠️ RİSKLİ (SAKAT)" if has_injured else "Temiz"
+        
+        g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
+        r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
+        
+        ratio = val_give / val_recv if val_recv != 0 else 0
+        acc = "🔥 Çok Yüksek" if ratio > 0.9 else ("✅ Yüksek" if ratio > 0.75 else "🤔 Orta")
+        
+        return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Kabul İhtimali': acc}
+    return None
 
-# --- TAKAS MOTORU (OPTIMIZE EDİLMİŞ) ---
-def trade_engine_optimized(df, my_team):
-    my_assets = df[df["Team"] == my_team].sort_values("Skor").head(5)
-    # Sadece ilk 10 rakip oyuncuya bak (Hız için)
-    opp_assets = (
-        df[(df["Team"] != my_team) & (df["Owner_Status"] == "Sahipli")]
-        .sort_values("Skor", ascending=False)
-        .head(10)
-    )
+st.title("🏀 Burak's GM Dashboard v9.1 (Cloud Ready)")
 
-    proposals = []
-    # 1v1
-    for _, m in my_assets.iterrows():
-        for _, o in opp_assets.iterrows():
-            diff = m["Genel_Kalite"] - o["Genel_Kalite"]
-            gain = o["Skor"] - m["Skor"]
-            if diff > -3.0 and gain > 2.0:
-                proposals.append(
-                    {
-                        "Tür": "1v1",
-                        "Ver": m["Player"],
-                        "Al": o["Player"],
-                        "Takım": o["Team"],
-                        "Şans": diff,
-                        "Kazanç": gain,
-                    }
-                )
+with st.sidebar:
+    st.header("Ayarlar")
+    if st.button("🔄 Verileri Yenile", type="primary"):
+        st.cache_data.clear()
+        st.rerun()
+    hide_injured = st.checkbox("Sakatları Listeden Gizle", value=False)
+    st.markdown("---")
+    punt_cats = st.multiselect("Punt:", ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO'])
 
-    # 2v1 (Konsolidasyon) - Sadece en iyi 2 asset kombinasyonu
-    if len(my_assets) >= 2:
-        m_combos = list(itertools.combinations(my_assets.head(3).index, 2))
-        for idxs in m_combos:
-            m_list = [df.loc[i] for i in idxs]
-            tot_give_q = sum([p["Genel_Kalite"] for p in m_list])
-            tot_give_s = sum([p["Skor"] for p in m_list])
+df, lg = load_data()
 
-            for _, o in opp_assets.head(5).iterrows():
-                diff = tot_give_q - o["Genel_Kalite"]
-                gain = o["Skor"] - tot_give_s
-                if diff > -4.0 and gain > -5.0:
-                    proposals.append(
-                        {
-                            "Tür": "2v1",
-                            "Ver": f"{m_list[0]['Player']}, {m_list[1]['Player']}",
-                            "Al": o["Player"],
-                            "Takım": o["Team"],
-                            "Şans": diff,
-                            "Kazanç": gain + 5.0,  # +5 Slot Bonusu
-                        }
-                    )
+if df is not None and not df.empty:
+    df['Team'] = df['Team'].astype(str).str.strip()
+    df, active_cats = calculate_z_scores(df, punt_cats)
+    weak, strong = analyze_needs(df, MY_TEAM_NAME, active_cats)
+    df = score_players_weighted(df, weak, active_cats)
+    
+    view_df = df.copy()
+    if hide_injured: view_df = view_df[~view_df['Health'].str.contains("🟥")]
 
-    if not proposals:
-        return pd.DataFrame()
+    c1, c2 = st.columns(2)
+    c1.error(f"📉 Hedefler: {', '.join(weak)}")
+    c2.success(f"📈 Güçlü Yönler: {', '.join(strong)}")
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Kadrolar & Fikstür", "🤝 Akıllı Takas", "⚔️ Rakip Analizi"])
+    
+    with tab1:
+        col_a, col_b = st.columns(2)
+        team_filter = col_a.selectbox("Takım Seç:", [MY_TEAM_NAME] + sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME]))
+        roster_view = view_df[view_df['Team'] == team_filter].sort_values(by='Skor', ascending=False)
+        cols_show = ['Player', 'Pos', 'Games_Next_7D', 'Trend', 'Health', 'Skor', 'GP', 'MPG', 'FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
+        st.dataframe(roster_view[cols_show], column_config={"Skor": st.column_config.ProgressColumn("Değer", format="%.1f", min_value=-5, max_value=15), "Games_Next_7D": st.column_config.NumberColumn("7 Gün", format="%d 🏀"), "Trend": st.column_config.TextColumn("Form")}, use_container_width=True, hide_index=True)
+        
+    with tab2:
+        opponents = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
+        target_opp = st.selectbox("Rakip Takım:", opponents)
+        if st.button("Senaryoları Hesapla"):
+            results_dict = trade_engine_grouped(df, MY_TEAM_NAME, target_opp, weak)
+            t_s, t_m, t_l, t_h = st.tabs(results_dict.keys())
+            for tab, (name, r_df) in zip([t_s, t_m, t_l, t_h], results_dict.items()):
+                with tab:
+                    if not r_df.empty: st.dataframe(r_df.head(15), column_config={"Puan": st.column_config.ProgressColumn("Stratejik Puan", min_value=0, max_value=12)}, use_container_width=True, hide_index=True)
+                    else: st.info(f"Bu grupta ({name}) uygun takas bulunamadı.")
 
-    return pd.DataFrame(proposals).sort_values("Kazanç", ascending=False)
-
-
-# ==========================================
-# 4. DASHBOARD (MAIN)
-# ==========================================
-
-st.title("🚀 Burak's GM Dashboard (Turbo Mod)")
-st.markdown("---")
-
-df_raw, lg = master_data_loader()
-
-if df_raw is not None and not df_raw.empty:
-    df_calc, active_cats = perform_calculations(df_raw.copy(), punt_cats)
-    targets, strengths = analyze_needs(df_calc, MY_TEAM_NAME, active_cats)
-
-    if targets:
-        df_final = score_players(df_calc, targets, active_cats)
-
-        # Filtreleme
-        col1, col2 = st.columns(2)
-        f_stat = col1.multiselect(
-            "Filtre:", ["Sahipli", "Free Agent"], default=["Sahipli", "Free Agent"]
-        )
-        h_inj = col2.checkbox("Sakatları Gizle (✅)", value=True)
-
-        v_df = df_final.copy()
-        if f_stat:
-            v_df = v_df[v_df["Owner_Status"].isin(f_stat)]
-        if h_inj:
-            v_df = v_df[v_df["Health"].str.contains("✅")]
-
-        show_cols = [
-            "Player",
-            "Team",
-            "Real_Team",
-            "Games_Next_7D",
-            "Trend",
-            "Pos",
-            "Health",
-            "GP",
-            "MPG",
-            "Skor",
-            "FG%",
-            "FT%",
-            "3PTM",
-            "PTS",
-            "REB",
-            "AST",
-            "ST",
-            "BLK",
-            "TO",
-        ]
-
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            ["🔥 Hedefler", "📋 Kadrom", "🌍 Liste", "🔄 Takas", "⚔️ Rakip"]
-        )
-
-        with tab1:
-            st.caption("Fikstür Avantajı: Sarı = Çok Maç, Kırmızı = Az Maç")
-            trade_df = v_df[v_df["Team"] != MY_TEAM_NAME].sort_values(
-                by="Skor", ascending=False
-            )
-            st.dataframe(
-                trade_df[show_cols].head(50),
-                column_config={
-                    "Skor": st.column_config.ProgressColumn(
-                        "Puan",
-                        format="%.1f",
-                        max_value=float(trade_df["Skor"].max())
-                        if not trade_df["Skor"].empty
-                        else 0,
-                    ),
-                    "Games_Next_7D": st.column_config.NumberColumn(
-                        "7G Maç", format="%d 🏀"
-                    ),
-                },
-                use_container_width=True,
-            )
-
-            # Scatter Plot (Performans vs Fikstür)
-            fa_view = v_df[v_df["Owner_Status"] == "Free Agent"].copy()
-            if not fa_view.empty:
-                fig = px.scatter(
-                    fa_view.head(100),
-                    x="MPG",
-                    y="Skor",
-                    color="Games_Next_7D",
-                    size="GP",
-                    hover_name="Player",
-                    title="Free Agent Fırsat Haritası",
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-        with tab2:
-            st.dataframe(
-                df_final[df_final["Team"] == MY_TEAM_NAME]
-                .sort_values("Skor", ascending=False)[show_cols],
-                use_container_width=True,
-            )
-
-        with tab3:
-            st.dataframe(v_df[show_cols], use_container_width=True)
-
-        with tab4:
-            if st.button("Takasları Tara"):
-                res = trade_engine_optimized(df_final, MY_TEAM_NAME)
-                if res is not None and not res.empty:
-                    st.dataframe(
-                        res,
-                        column_config={
-                            "Şans": st.column_config.ProgressColumn(
-                                "Onay İhtimali", min_value=-5, max_value=5
-                            )
-                        },
-                        use_container_width=True,
-                    )
-                else:
-                    st.warning("Fırsat bulunamadı.")
-
-        with tab5:
-            # Rakip Analizi
-            opps = df_final[df_final["Owner_Status"] == "Sahipli"]["Team"].unique()
-            opps = [o for o in opps if o != MY_TEAM_NAME]
-            if opps:
-                sel = st.selectbox("Rakip:", opps)
-                if sel:
-                    s1, s2, det = get_matchup_prediction(
-                        df_final, MY_TEAM_NAME, sel, active_cats
-                    )
-                    c1, c2 = st.columns(2)
-                    c1.metric("Sen", s1)
-                    c2.metric(sel, s2)
-                    st.dataframe(det, use_container_width=True)
-            else:
-                st.info("Rakip takımlar yüklenemedi.")
-
+    with tab3:
+        opp_anal = st.selectbox("Rakip:", opponents, key="opp_anal")
+        if opp_anal:
+            cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
+            my_s = df[df['Team'] == MY_TEAM_NAME][cats].mean()
+            op_s = df[df['Team'] == opp_anal][cats].mean()
+            res = []
+            s_me, s_op = 0, 0
+            for c in cats:
+                v_m = my_s[c]; v_o = op_s[c]
+                win = (v_m < v_o) if c == 'TO' else (v_m > v_o)
+                if win: s_me +=1; res.append({'Kat': c, 'Ben': f"{v_m:.1f}", 'Rakip': f"{v_o:.1f}", 'Kazanan': "✅ Ben"})
+                else: s_op +=1; res.append({'Kat': c, 'Ben': f"{v_m:.1f}", 'Rakip': f"{v_o:.1f}", 'Kazanan': "❌ Rakip"})
+            c1, c2 = st.columns(2)
+            c1.metric("Tahmini Skor", f"{s_me} - {s_op}")
+            st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
 else:
-    st.info("Sistem başlatılamadı. OAuth / lig bilgilerini kontrol et lütfen.")
+    st.info("Sistem verileri bekliyor... (Cloud Secrets veya yerel dosya kontrol edin)")
