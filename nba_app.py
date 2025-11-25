@@ -38,7 +38,7 @@ ANALYSIS_TYPE_AVG = 'average_season'
 ANALYSIS_TYPE_TOTAL = 'season'
 NBA_SEASON_STRING = "2025-26"
 
-DATA_VERSION = "v23_week_sync_numeric_fix"
+DATA_VERSION = "v24_week_with_yahoo_totals"
 
 st.set_page_config(page_title="Burak's GM v15.0", layout="wide", page_icon="🏀")
 
@@ -66,6 +66,9 @@ def normalize_name(name: str) -> str:
             n = n[: -len(suf)]
     n = " ".join(n.split())
     return n
+
+def normalize_team_name(n: str) -> str:
+    return (n or "").strip()
 
 # ==========================================
 # AUTH & SCHEDULE
@@ -540,6 +543,104 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
     return result_dfs
 
 # ==========================================
+# YAHOO HAFTALIK GERÇEKLEŞEN TOPLAM İSTATİSTİKLER
+# ==========================================
+def get_weekly_totals_from_yahoo(lg, my_team_name: str, opp_team_name: str, week: int | None = None):
+    """
+    Yahoo Fantasy'den o haftanın gerçekleşmiş matchup istatistiklerini çeker.
+    Dönen yapı:
+    {
+      'week': week_no,
+      'my':  {'team_name': 'Burak's Wizards', 'stats': {...}},
+      'opp': {'team_name': 'Rakip',          'stats': {...}}
+    }
+    """
+    try:
+        if week is None:
+            try:
+                week = lg.current_week()
+            except Exception:
+                st.warning("Mevcut hafta bilgisi alınamadı (lg.current_week).")
+                return None
+
+        # Stat ID -> display name map
+        cats_meta = lg.stat_categories()
+        stat_map = {}
+        for st_meta in cats_meta.get('stats', []):
+            sid = str(st_meta.get('stat_id'))
+            dname = st_meta.get('display_name') or st_meta.get('name')
+            stat_map[sid] = dname
+
+        desired_labels = {'FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'}
+
+        def extract_team_name(tdict):
+            return (tdict.get('name') or
+                    tdict.get('team_name') or
+                    tdict.get('nickname') or
+                    str(tdict.get('team_id')))
+
+        def extract_stats(tdict):
+            s_container = tdict.get('team_stats') or tdict.get('stats') or {}
+            if isinstance(s_container, dict):
+                stats_list = s_container.get('stats', [])
+            else:
+                stats_list = s_container
+            result = {}
+            if not isinstance(stats_list, list):
+                return result
+            for st in stats_list:
+                sid = str(st.get('stat_id'))
+                val = st.get('value')
+                label = stat_map.get(sid)
+                if label in desired_labels:
+                    result[label] = val
+            return result
+
+        my_norm = normalize_team_name(my_team_name)
+        opp_norm = normalize_team_name(opp_team_name)
+
+        matchups = lg.matchups(week)
+
+        for mu in matchups:
+            teams_obj = mu.get('teams') or mu.get('team')
+            if isinstance(teams_obj, dict) and 'team' in teams_obj:
+                tlist = teams_obj['team']
+            else:
+                tlist = teams_obj
+
+            if not isinstance(tlist, list) or len(tlist) != 2:
+                continue
+
+            t_a, t_b = tlist[0], tlist[1]
+            name_a = normalize_team_name(extract_team_name(t_a))
+            name_b = normalize_team_name(extract_team_name(t_b))
+
+            if {name_a, name_b} != {my_norm, opp_norm}:
+                continue
+
+            # Bu bizim haftalık matchup’ımız
+            if name_a == my_norm:
+                my_t, opp_t = t_a, t_b
+                my_name_final, opp_name_final = name_a, name_b
+            else:
+                my_t, opp_t = t_b, t_a
+                my_name_final, opp_name_final = name_b, name_a
+
+            my_stats = extract_stats(my_t)
+            opp_stats = extract_stats(opp_t)
+
+            return {
+                'week': week,
+                'my':  {'team_name': my_name_final,  'stats': my_stats},
+                'opp': {'team_name': opp_name_final, 'stats': opp_stats}
+            }
+
+        return None
+    except Exception as e:
+        print("weekly totals error:", e)
+        return None
+
+# ==========================================
 # HAFTALIK EŞLEŞME PROJEKSİYONU
 # ==========================================
 def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: datetime.date, num_days: int):
@@ -890,7 +991,7 @@ if df is not None and not df.empty:
 
             # ---- Haftalık Eşleşme Analizi ----
             with tab_matchup:
-                st.caption("Bu sekmede, seçtiğin rakibe karşı seçili hafta için maç sayıları ve tahmini üretim hesaplanır; 🔴 Sakatlar hariç. ESPN veri vermezse Games_Next_7D fallback kullanılır.")
+                st.caption("Bu sekmede, seçtiğin rakibe karşı seçili hafta için maç sayıları ve tahmini üretim hesaplanır; 🔴 Sakatlar hariç. ESPN veri vermezse Games_Next_7D fallback kullanılır. En altta Yahoo’dan canlı gelen gerçekleşmiş toplamlar gösterilir.")
 
                 sched_by_day = get_schedule_espn_by_day(week_start_str, num_days_int)
 
@@ -968,3 +1069,30 @@ if df is not None and not df.empty:
 
                 st.markdown("#### Kategori Bazlı Haftalık Projeksiyon (Sakatlar Hariç)")
                 st.dataframe(pd.DataFrame(cat_rows), use_container_width=True, hide_index=True)
+
+                # ---- YAHOO’DAN CANLI GERÇEKLEŞEN TOPLAMLAR ----
+                st.markdown("#### 📊 Yahoo Canlı Haftalık Toplamlar (Gerçekleşen Değerler)")
+                weekly_totals = get_weekly_totals_from_yahoo(lg, MY_TEAM_NAME, op_a)
+
+                if weekly_totals is None:
+                    st.info("Bu hafta için Yahoo canlı toplamları alınamadı (matchups() veya stat eşleşmesi bulunamadı).")
+                else:
+                    des_cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
+                    my_stats = weekly_totals['my']['stats']
+                    opp_stats = weekly_totals['opp']['stats']
+
+                    table_rows = []
+                    table_rows.append(
+                        {
+                            'Takım': weekly_totals['my']['team_name'],
+                            **{cat: my_stats.get(cat, '-') for cat in des_cats}
+                        }
+                    )
+                    table_rows.append(
+                        {
+                            'Takım': weekly_totals['opp']['team_name'],
+                            **{cat: opp_stats.get(cat, '-') for cat in des_cats}
+                        }
+                    )
+                    yahoo_df = pd.DataFrame(table_rows)
+                    st.dataframe(yahoo_df, use_container_width=True, hide_index=True)
