@@ -567,7 +567,6 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
 
 # ==========================================
 # YAHOO HAFTALIK GERÇEKLEŞEN TOPLAM İSTATİSTİKLER
-# (list/dict matchups formatı ve boş durumlar için güvenli)
 # ==========================================
 def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
     """
@@ -619,7 +618,6 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
         opp_id = name_to_id.get(opp_norm)
 
         if my_id is None or opp_id is None:
-            # İsim eşleşmezse zorlamadan None dön
             return None
 
         # --- 4) Yardımcı fonksiyonlar ---
@@ -676,7 +674,6 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
             matchups = []
 
         for mu in matchups:
-            # Bazı durumlarda mu liste olabiliyor, içinden ilk dict'i seç
             if isinstance(mu, list):
                 mu = next((x for x in mu if isinstance(x, dict)), None)
                 if mu is None:
@@ -701,11 +698,9 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
             if id_a is None or id_b is None:
                 continue
 
-            # Bu matchup bizim mi?
             if {id_a, id_b} != {my_id, opp_id}:
                 continue
 
-            # Evet: hangi taraf benim, hangi taraf rakip?
             if id_a == my_id:
                 my_t, opp_t = t_a, t_b
             else:
@@ -769,7 +764,6 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
                 'opp': {'team_name': opp_team_name, 'stats': opp_stats_final}
             }
 
-        # Buraya gelindiyse veri bulunamamış demektir
         return None
 
     except Exception as e:
@@ -798,7 +792,6 @@ def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: dat
         }
         return daily_rows, weekly
 
-    # Games_Next_7D numeric garanti
     if 'Games_Next_7D' in active.columns:
         active['Games_Next_7D'] = pd.to_numeric(active['Games_Next_7D'], errors='coerce').fillna(0.0)
 
@@ -831,7 +824,6 @@ def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: dat
 
     week_games = sum(r['Maç_Sayısı_Sen'] for r in daily_rows)
 
-    # ESPN hiç maç döndürmediyse, Games_Next_7D fallback
     if week_games == 0:
         if 'Games_Next_7D' not in active.columns:
             weekly = {
@@ -879,7 +871,6 @@ def project_team_week(team_df: pd.DataFrame, sched_by_day: dict, start_date: dat
         }
         return daily_rows, weekly
 
-    # ESPN verisi çalıştıysa
     week_fp = sum(r['Proj_FP_Sen'] for r in daily_rows)
     week_cats = {
         c: sum(r[f"{c}_Sen"] for r in daily_rows) for c in proj_cats
@@ -901,9 +892,8 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    # Hafta başlangıcı: bugünün bulunduğu haftanın pazartesisi
     today = datetime.now().date()
-    default_start = today - timedelta(days=today.weekday())  # Pazartesi
+    default_start = today - timedelta(days=today.weekday())
     week_start = st.date_input("Hafta başlangıç tarihi (Yahoo Week ile senkron)", value=default_start)
     num_days = st.number_input("Hafta uzunluğu (gün)", min_value=5, max_value=10, value=7, step=1)
     week_start_str = week_start.isoformat()
@@ -917,7 +907,6 @@ df, lg = load_data(DATA_VERSION, week_start_str, num_days_int)
 if df is not None and not df.empty:
     df['Team'] = df['Team'].astype(str).str.strip()
 
-    # Güvence: numeric dönüşüm (cache sonrası da garantile)
     num_cols = ['Skor','FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO',
                 'Games_Next_7D','GP','MPG']
     for c in num_cols:
@@ -927,7 +916,6 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
-    # Sakat + Riskli oyuncuları gizle
     if hide_inj:
         inj_mask = df['Health'].astype(str).str.contains('Sakat|Riskli', regex=True, na=False)
         v_df = df.loc[~inj_mask].copy()
@@ -1038,11 +1026,10 @@ if df is not None and not df.empty:
         st.subheader("Rakip Karşılaştırma – Sezon, Haftalık Projeksiyon ve Eşleşme Analizi")
         st.caption(f"Hafta penceresi: {week_start.strftime('%d.%m.%Y')} + {num_days_int} gün.")
 
-        # --- Lig Geneli Z-Score Analizi ---
         st.markdown("### 📊 Lig Geneli Takım Analizi (Güçlü/Zayıf Yönler)")
         
-        # 1. Heatmap Expander
-        with st.expander("Detaylı Z-Score Isı Haritası", expanded=False):
+        # 1. Heatmap Expander (matplotlib'siz, sade tablo)
+        with st.expander("Detaylı Z-Score Tablosu", expanded=False):
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
             for c in cats:
                 if c in df.columns:
@@ -1058,11 +1045,9 @@ if df is not None and not df.empty:
             
             if "Free Agent" in team_z.index:
                 team_z = team_z.drop("Free Agent")
-                
-            st.dataframe(
-                team_z.style.format("{:.2f}").background_gradient(cmap='RdYlGn', axis=0),
-                use_container_width=True
-            )
+            
+            # 🔧 BURASI DEĞİŞTİ: Styler + background_gradient yerine düz tablo
+            st.dataframe(team_z.round(2), use_container_width=True)
 
         # 2. Top 3 / Bottom 3 Summary
         with st.expander("Takım Güç/Zayıflık Özeti (Top 3 / Bottom 3)", expanded=True):
@@ -1085,7 +1070,6 @@ if df is not None and not df.empty:
             
             st.dataframe(pd.DataFrame(analysis_data), use_container_width=True, hide_index=True)
         
-        # ---------------------------------------------
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op_a = st.selectbox("Rakip Takım Seç", ops)
         
@@ -1203,7 +1187,6 @@ if df is not None and not df.empty:
 
                 daily_df = pd.DataFrame(rows)
 
-                # Haftalık toplam + oynanan / kalan
                 today = datetime.now().date()
                 idx_cutoff = (today - week_start).days + 1
                 if idx_cutoff < 0:
@@ -1262,7 +1245,6 @@ if df is not None and not df.empty:
                 st.markdown("#### Kategori Bazlı Haftalık Projeksiyon (Sakatlar Hariç)")
                 st.dataframe(pd.DataFrame(cat_rows), use_container_width=True, hide_index=True)
 
-                # ---- YAHOO’DAN CANLI GERÇEKLEŞEN TOPLAMLAR ----
                 st.markdown("#### 📊 Yahoo Canlı Haftalık Toplamlar (Gerçekleşen Değerler)")
                 weekly_totals = get_weekly_totals_from_yahoo(lg, MY_TEAM_NAME, op_a)
 
@@ -1299,11 +1281,9 @@ if df is not None and not df.empty:
         st.subheader("Lig Durumu – Haftalık Eşleşme Skorları")
         
         try:
-            # Mevcut haftanın tüm eşleşmelerini çek
             week = lg.current_week()
             matchups_raw = lg.matchups(week)
             
-            # matchups çıktısı list veya dict olabilir, normalize et
             if isinstance(matchups_raw, dict):
                 if 'matchups' in matchups_raw and isinstance(matchups_raw['matchups'], list):
                     matchups = matchups_raw['matchups']
@@ -1318,7 +1298,6 @@ if df is not None and not df.empty:
             
             cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
             
-            # Stat map
             cats_meta = lg.stat_categories()
             stat_map = {}
             for st_meta in cats_meta.get('stats', []):
@@ -1329,7 +1308,6 @@ if df is not None and not df.empty:
             desired_labels = set(cats)
             
             for mu in matchups:
-                # Bazı durumlarda mu liste olabiliyor, içinden ilk dict'i çek
                 if isinstance(mu, list):
                     mu = next((x for x in mu if isinstance(x, dict)), None)
                     if mu is None:
@@ -1338,7 +1316,6 @@ if df is not None and not df.empty:
                 if not isinstance(mu, dict):
                     continue
 
-                # Takım verilerini ayrıştır
                 teams_obj = mu.get('teams') or mu.get('team')
                 if isinstance(teams_obj, dict) and 'team' in teams_obj:
                     tlist = teams_obj['team']
@@ -1397,7 +1374,6 @@ if df is not None and not df.empty:
                 stats_a = parse_stats(t_a_data)
                 stats_b = parse_stats(t_b_data)
                 
-                # Score hesapla
                 score_a = 0
                 score_b = 0
                 
@@ -1405,7 +1381,6 @@ if df is not None and not df.empty:
                     val_a = stats_a.get(c, 0.0)
                     val_b = stats_b.get(c, 0.0)
                     
-                    # TO: düşük olan kazanır
                     if c == 'TO':
                         if val_a < val_b:
                             score_a += 1
