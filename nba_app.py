@@ -15,21 +15,20 @@ from datetime import datetime, timedelta
 # AYARLAR & SABİTLER
 # ==========================================
 SEASON_YEAR = 2025  
-NBA_SEASON_STRING = '2025-26' 
 TARGET_LEAGUE_ID = "61142"  
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM Dashboard v9.3", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM Dashboard v9.4 (Unstoppable)", layout="wide", page_icon="🏀")
 
-# --- NBA API ---
+# --- NBA API (Opsiyonel - Varsa kullan, yoksa geç) ---
 try:
     from nba_api.stats.endpoints import leaguedashplayerstats
     NBA_API_AVAILABLE = True
 except ImportError:
     NBA_API_AVAILABLE = False
 
-# Takım Eşleştirme (Yahoo -> Standart)
+# Takım Eşleştirme
 TEAM_MAPPER = {
     'ATL': 'ATL', 'BOS': 'BOS', 'BKN': 'BKN', 'CHA': 'CHA', 'CHI': 'CHI',
     'CLE': 'CLE', 'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GS': 'GSW', 'GSW': 'GSW',
@@ -41,30 +40,31 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# 1. VERİ ÇEKME MOTORU
+# 1. VERİ ÇEKME MOTORU (HATA KORUMALI)
 # ==========================================
 
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
     """
-    NBA.com'dan istatistikleri çeker.
-    Hata verirse BOŞ SÖZLÜK döner (Sistemi kilitlemez).
+    NBA.com'dan istatistik çeker.
+    TIMEOUT: 3 Saniye. Eğer cevap vermezse anında pes eder ve boş döner.
+    Böylece uygulama donmaz.
     """
     if not NBA_API_AVAILABLE: return {}
     
     custom_headers = {
         'Host': 'stats.nba.com',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://www.nba.com/',
         'Connection': 'keep-alive'
     }
 
-    # Sadece 1 kere dene, olmazsa vakit kaybetme
     try:
+        # ÇOK KISA TIMEOUT (3 sn) - Cloud IP'si blokluysa bekleme yapma
         stats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=NBA_SEASON_STRING, 
+            season='2025-26', 
             per_mode_detailed='PerGame',
-            timeout=15, # Timeout düşürüldü, hızlıca pes etsin
+            timeout=3, 
             headers=custom_headers
         )
         df = stats.get_data_frames()[0]
@@ -73,18 +73,16 @@ def get_nba_real_stats():
             clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
             nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
         return nba_data
-    except Exception as e: 
-        print(f"⚠️ NBA API Hatası (Atlanıyor): {e}")
-        return {} # Boş dön, program çalışmaya devam etsin
+    except Exception:
+        # Hata ne olursa olsun (Timeout, Connection vb.) boş dön.
+        return {} 
 
 @st.cache_data(ttl=3600)
-def get_schedule_robust():
-    """Fikstür çeker. Başarısız olursa simülasyon yapar."""
+def get_schedule_espn():
+    """ESPN API (Hızlı Fikstür)."""
     team_game_counts = {}
     today = datetime.now()
-    success = False
-
-    # ESPN API (Hızlı)
+    
     try:
         for i in range(7):
             date_str = (today + timedelta(days=i)).strftime('%Y%m%d')
@@ -98,77 +96,77 @@ def get_schedule_robust():
                             abbr = competitor['team']['abbreviation']
                             std_abbr = TEAM_MAPPER.get(abbr, abbr)
                             team_game_counts[std_abbr] = team_game_counts.get(std_abbr, 0) + 1
-                success = True
             time.sleep(0.05)
-    except: pass
+        return team_game_counts
+    except:
+        # Hata varsa simülasyon dön
+        sim = {}
+        for t in TEAM_MAPPER.values(): sim[t] = 3
+        return sim
 
-    if not success or len(team_game_counts) < 5:
-        return _simulate_schedule()
-        
-    return team_game_counts
-
-def _simulate_schedule():
-    """Yedek Plan: Rastgele maç sayıları."""
-    sim = {}
-    for team in TEAM_MAPPER.values():
-        sim[team] = 3 if np.random.rand() > 0.5 else 4
-    return sim
-
-def authenticate_yahoo():
+def authenticate_yahoo_ui():
     """
-    Güçlendirilmiş Kimlik Doğrulama
+    1. Secrets kontrol eder.
+    2. Dosya kontrol eder.
+    3. İkisi de yoksa UI'dan input bekler.
     """
-    # 1. Secrets'tan Dosya Oluşturma
+    # 1. SECRETS
     if 'yahoo_auth' in st.secrets:
         try:
-            # Secrets objesini dictionary'e çevir
-            secrets_data = st.secrets['yahoo_auth']
-            # Dictionary değilse (bazen string gelir) parse etmeye çalış
-            if not isinstance(secrets_data, dict):
-                # Bu blok Streamlit sürümüne göre değişebilir
-                pass 
-            
-            # Dosyaya yaz
             with open('oauth2.json', 'w') as f:
-                # st.secrets'ı direkt json.dump yapamayabiliriz, dict() ile cast et
-                json.dump(dict(secrets_data), f)
-        except Exception as e:
-            st.error(f"Secrets okuma hatası: {e}")
+                json.dump(dict(st.secrets['yahoo_auth']), f)
+        except: pass
 
-    # 2. Dosyadan Okuma
+    # 2. DOSYA VARSA DENE
     if os.path.exists('oauth2.json'):
         try:
             sc = OAuth2(None, None, from_file='oauth2.json')
-            # Token kontrolü - Eğer süresi dolmuşsa refresh dener
             if not sc.token_is_valid():
                 sc.refresh_access_token()
             return sc
-        except Exception as e:
-            st.error(f"Token Hatası: {e}")
-            return None
-            
-    st.error("❌ 'oauth2.json' bulunamadı ve Secrets yapılandırılamadı.")
+        except: pass
+    
     return None
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_data():
+# ==========================================
+# LOAD DATA (GÜVENLİ MOD)
+# ==========================================
+def load_data_safe():
+    # --- YAN PANEL TOKEN GİRİŞİ (ACİL DURUM) ---
+    st.sidebar.header("🔐 Acil Durum Girişi")
+    manual_token = st.sidebar.text_area("Eğer 'Running'de kalıyorsa, oauth2.json içeriğini buraya yapıştırın:")
+    
+    if manual_token:
+        try:
+            with open('oauth2.json', 'w') as f:
+                f.write(manual_token)
+            st.sidebar.success("Token kaydedildi! Sayfa yenileniyor...")
+            time.sleep(1)
+            st.rerun()
+        except:
+            st.sidebar.error("Geçersiz format.")
+
     status = st.status("Veriler Yükleniyor...", expanded=True)
     
-    status.write("📅 Fikstür (ESPN)...")
-    nba_schedule = get_schedule_robust()
+    # 1. Fikstür
+    status.write("📅 Fikstür çekiliyor...")
+    nba_schedule = get_schedule_espn()
     
-    status.write("📊 İstatistikler (NBA API)...")
-    nba_stats_dict = get_nba_real_stats() # Hata verse de boş döner, çökmez
-    
+    # 2. İstatistikler (Hata verirse boş geç)
+    status.write("📊 İstatistikler (NBA) deneniyor...")
+    nba_stats_dict = get_nba_real_stats()
     if not nba_stats_dict:
-        status.warning("⚠️ NBA API yanıt vermedi. GP ve MPG verileri eksik olacak.")
+        status.write("⚠️ NBA Sunucusu yanıt vermedi. Sadece Yahoo verileri kullanılacak.")
     
-    status.write("🔐 Yahoo Bağlantısı...")
-    sc = authenticate_yahoo()
-    if not sc: 
-        status.update(label="Giriş Başarısız", state="error")
-        st.error("Lütfen geçerli bir Token'ı Secrets kısmına yapıştırın.")
-        return None, None
+    # 3. Auth
+    status.write("🔐 Kimlik doğrulanıyor...")
+    sc = authenticate_yahoo_ui()
+    
+    if not sc:
+        status.update(label="Giriş Yapılamadı", state="error")
+        st.error("### 🛑 Giriş Başarısız!")
+        st.warning("Lütfen 'oauth2.json' dosyasının içeriğini kopyalayıp sol taraftaki kutuya yapıştırın.")
+        st.stop() # Uygulamayı burada durdur, hata fırlatma.
 
     try:
         gm = yfa.Game(sc, 'nba')
@@ -176,15 +174,14 @@ def load_data():
         target_lid = next((lid for lid in league_ids if TARGET_LEAGUE_ID in lid), None)
         
         if not target_lid:
-            status.update(label="Lig Bulunamadı", state="error")
             st.error(f"Lig ID {TARGET_LEAGUE_ID} bulunamadı.")
-            return None, None
+            st.stop()
 
         lg = gm.to_league(target_lid)
         teams = lg.teams()
         all_data = []
         
-        status.write(f"📥 {len(teams)} Takım indiriliyor...")
+        status.write("📥 Takım verileri indiriliyor...")
         prog = status.progress(0)
         
         for idx, team_key in enumerate(teams.keys()):
@@ -195,7 +192,7 @@ def load_data():
                 if p_ids:
                     stats_s = lg.player_stats(p_ids, ANALYSIS_TYPE)
                     try: stats_m = lg.player_stats(p_ids, 'lastmonth')
-                    except: stats_m = stats_s 
+                    except: stats_m = stats_s
                     
                     for i, pm in enumerate(roster):
                         if i < len(stats_s):
@@ -204,9 +201,10 @@ def load_data():
             except: pass
             prog.progress((idx + 1) / (len(teams) + 1))
 
+        # Free Agents (Limitli)
         status.write("🆓 Free Agents...")
         try:
-            fa_players = lg.free_agents(None)[:80]
+            fa_players = lg.free_agents(None)[:60]
             fa_ids = [p['player_id'] for p in fa_players]
             if fa_ids:
                 stats_s = lg.player_stats(fa_ids, ANALYSIS_TYPE)
@@ -219,11 +217,10 @@ def load_data():
         except: pass
         
         prog.progress(1.0)
-        status.update(label="Tamamlandı!", state="complete", expanded=False)
+        status.update(label="Hazır!", state="complete", expanded=False)
         return pd.DataFrame(all_data), lg
         
     except Exception as e:
-        status.update(label="Kritik Hata", state="error")
         st.error(f"Veri işleme hatası: {e}")
         return None, None
 
@@ -235,14 +232,12 @@ def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_di
             except: return 0.0
 
         name = meta['name']
-        
-        # Pozisyon
         raw_pos = meta.get('display_position', '').replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F')
         pos_set = set(raw_pos.split(','))
         order = {'G':1, 'F':2, 'C':3}
         final_pos = "/".join(sorted(list(pos_set), key=lambda x: order.get(x, 9)))
 
-        # NBA Dict Kontrolü (Hata varsa 0 döner)
+        # NBA Verisi YOKSA 0 Bas (Çökmesin)
         real_gp, real_mpg, nba_team = 0, 0.0, "N/A"
         if nba_dict:
             c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
@@ -255,27 +250,26 @@ def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_di
             y_abbr = meta.get('editorial_team_abbr', 'N/A').upper()
             nba_team = TEAM_MAPPER.get(y_abbr, y_abbr)
 
-        games_7d = nba_schedule.get(nba_team, 0)
+        games_7d = nba_schedule.get(nba_team, 3) # Varsayılan 3
         
         st_code = meta.get('status', '')
         is_injured = st_code in ['INJ', 'O', 'GTD', 'DTD']
         inj_str = f"🟥 {st_code}" if st_code in ['INJ', 'O'] else (f"Rx {st_code}" if is_injured else "✅")
 
-        # Trend
         def f_score(s):
             return (val(s.get('PTS')) + val(s.get('REB'))*1.2 + val(s.get('AST'))*1.5 + 
                     val(s.get('ST'))*3 + val(s.get('BLK'))*3 - val(s.get('TO')))
         
         fs_s = f_score(stat_s)
         fs_m = f_score(stat_m)
-        trend = "➖"
         
+        trend = "➖"
         if is_injured: trend = "🏥"
-        elif abs(fs_s - fs_m) < 0.1: trend = "➖"
+        elif abs(fs_s - fs_m) < 0.2: trend = "➖"
         else:
             diff = fs_m - fs_s
-            if diff > 5.0: trend = "🔥"
-            elif diff > 2.0: trend = "↗️"
+            if diff > 5.5: trend = "🔥"
+            elif diff > 2.5: trend = "↗️"
             elif diff < -5.0: trend = "🥶"
             elif diff < -2.0: trend = "↘️"
 
@@ -295,17 +289,14 @@ def calculate_z_scores(df, punt_list):
     cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
     active = [c for c in cats if c not in punt_list]
     if df.empty: return df, active
-    
     for c in cats:
         if c in punt_list: 
-            df[f'z_{c}'] = 0.0
-            continue
+            df[f'z_{c}'] = 0.0; continue
         mean = df[c].mean(); std = df[c].std()
         if std == 0: std = 1
         z = (df[c] - mean) / std
         if c == 'TO': z = -z 
         df[f'z_{c}'] = z
-        
     df['Genel_Kalite'] = df[[f'z_{c}' for c in active]].sum(axis=1)
     return df, active
 
@@ -316,7 +307,6 @@ def score_players_weighted(df, targets, active_cats):
         weight = 1.0
         if c in targets: weight = 1.5 
         if col in df.columns: df['Skor'] += df[col] * weight
-            
     df['Trade_Value'] = df['Skor']
     mask_injured = df['Health'].str.contains('🟥|Rx')
     df.loc[mask_injured, 'Trade_Value'] = df.loc[mask_injured, 'Skor'] * 0.5
@@ -357,7 +347,6 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
             my_combos = list(itertools.combinations(my_assets.index, n_give))
             opp_combos = list(itertools.combinations(opp_assets.index, n_recv))
             
-            # Kombinasyon limitini biraz düşürdük ki timeout yemesin
             if len(my_combos) * len(opp_combos) > 500:
                 my_combos = my_combos[:15]; opp_combos = opp_combos[:15]
             
@@ -400,7 +389,11 @@ def analyze_trade_scenario(give, recv, my_needs):
         return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Kabul İhtimali': acc}
     return None
 
-st.title("🏀 Burak's GM Dashboard v9.3 (Final Fix)")
+# ==========================================
+# MAIN APP
+# ==========================================
+
+st.title("🏀 Burak's GM Dashboard v9.4 (Unstoppable)")
 
 with st.sidebar:
     st.header("Ayarlar")
@@ -411,7 +404,7 @@ with st.sidebar:
     st.markdown("---")
     punt_cats = st.multiselect("Punt:", ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO'])
 
-df, lg = load_data()
+df, lg = load_data_safe() # GÜVENLİ LOAD FONKSİYONU
 
 if df is not None and not df.empty:
     df['Team'] = df['Team'].astype(str).str.strip()
@@ -463,4 +456,4 @@ if df is not None and not df.empty:
             c1.metric("Tahmini Skor", f"{s_me} - {s_op}")
             st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
 else:
-    st.info("Sistem verileri bekliyor... (Cloud Secrets veya yerel dosya kontrol edin)")
+    st.info("Veri bekleniyor...")
