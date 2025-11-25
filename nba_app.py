@@ -19,14 +19,7 @@ except ImportError:
 # ==========================================
 # 🚨 TOKEN ALANI (DOLU VE HAZIR)
 # ==========================================
-MANUAL_TOKEN_DATA = {
-    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
-    "consumer_key": "dj0yJmk9SnRUd2xhMzcwWThNJmQ9WVdrOWRHOXlkR1ZaVjJrbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTY5",
-    "consumer_secret": "fed1b9a1af2b7d978917ed0d7401578e61ad29f8",
-    "refresh_token": "AJ5rJGl_.0az6KK_IHrVgXaM8K.G~001~gz6NHZIiOKCi8PAws78as.8AqODjiPk-",
-    "token_time": 1764052012.0662093,
-    "token_type": "bearer"
-}
+# MANUAL_TOKEN_DATA removed for security. Use YAHOO_AUTH_DATA env var.
 
 # ==========================================
 # AYARLAR
@@ -74,13 +67,40 @@ def normalize_team_name(n: str) -> str:
 # AUTH & SCHEDULE
 # ==========================================
 def authenticate_direct():
-    if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
-        st.error("🚨 Token hatası!")
+    token_data = None
+    
+    # 1. Environment Variable'dan okumayı dene
+    token_env = os.environ.get("YAHOO_AUTH_DATA")
+    if token_env:
+        try:
+            token_data = json.loads(token_env)
+        except json.JSONDecodeError:
+            st.warning("UYARI: 'YAHOO_AUTH_DATA' geçersiz formatta. Test verisi kullanılıyor.")
+            token_data = None
+
+    if not token_data:
+        # 2. Env var yoksa Fallback (Test) verisini kullan
+        st.warning("UYARI: 'YAHOO_AUTH_DATA' bulunamadı. Test amaçlı geçici token verisi kullanılıyor.")
+        # Fallback Token Data (Test Amaçlı)
+        fallback_token_data = {
+            "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
+            "consumer_key": "dj0yJmk9SnRUd2xhMzcwWThNJmQ9WVdrOWRHOXlkR1ZaVjJrbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTY5",
+            "consumer_secret": "fed1b9a1af2b7d978917ed0d7401578e61ad29f8",
+            "refresh_token": "AJ5rJGl_.0az6KK_IHrVgXaM8K.G~001~gz6NHZIiOKCi8PAws78as.8AqODjiPk-",
+            "token_time": 1764052012.0662093,
+            "token_type": "bearer"
+        }
+        token_data = fallback_token_data
+
+    if not token_data:
+        st.error("Auth verisi bulunamadı!")
         st.stop()
+
     try:
-        with open('temp_auth.json', 'w') as f:
-            json.dump(MANUAL_TOKEN_DATA, f)
-        sc = OAuth2(None, None, from_file='temp_auth.json')
+        ck = token_data.pop('consumer_key', None)
+        cs = token_data.pop('consumer_secret', None)
+        sc = OAuth2(ck, cs, store_file=False, **token_data)
+        
         if not sc.token_is_valid():
             try:
                 sc.refresh_access_token()
@@ -416,14 +436,17 @@ def get_z_and_trade_val(df, punt):
         return df, act
     
     for c in cats:
-        if c in punt:
-            df[f'z_{c}'] = 0.0
-            continue
         m, s = df[c].mean(), df[c].std()
         z = (df[c] - m) / (s if s != 0 else 1)
-        df[f'z_{c}'] = -z if c == 'TO' else z
+        val = -z if c == 'TO' else z
         
-    df['Uygunluk_Puanı'] = df[[f'z_{c}' for c in act]].sum(axis=1)
+        # Soft Punt: Seçili olmayan (punt dışı) kategorilere %50 fazla ağırlık
+        weight = 1.0 if c in punt else 1.5
+        df[f'z_{c}'] = val * weight
+        
+    # Tüm kategorilerin (punt dahil) ağırlıklı z-skorlarını topla
+    df['Uygunluk_Puanı'] = df[[f'z_{c}' for c in cats]].sum(axis=1)
+    
     mask = df['Health'].astype(str).str.contains('Sakat|Riskli', regex=True, na=False)
     df.loc[mask, 'Uygunluk_Puanı'] *= 0.5
     
@@ -544,6 +567,7 @@ def trade_engine_grouped(df, my_team, target_opp, my_needs):
 
 # ==========================================
 # YAHOO HAFTALIK GERÇEKLEŞEN TOPLAM İSTATİSTİKLER
+# (list/dict matchups formatı ve boş durumlar için güvenli)
 # ==========================================
 def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
     """
@@ -552,7 +576,7 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
     Dönen yapı:
     {
       'week': week_no,
-      'my':  {'team_name': 'Burak's Wizards', 'stats': {...}},
+      'my':  {'team_name': "Burak's Wizards", 'stats': {...}},
       'opp': {'team_name': 'Rakip',          'stats': {...}}
     }
     """
@@ -595,20 +619,21 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
         opp_id = name_to_id.get(opp_norm)
 
         if my_id is None or opp_id is None:
-            st.warning(
-                f"Takım ID eşleşmesi bulunamadı. (my_id={my_id}, opp_id={opp_id}) "
-                "Lig takım isimleri ile dashboard takım isimleri birebir aynı mı kontrol et."
-            )
+            # İsim eşleşmezse zorlamadan None dön
             return None
 
         # --- 4) Yardımcı fonksiyonlar ---
         def extract_team_name(tdict):
+            if not isinstance(tdict, dict):
+                return "Bilinmeyen"
             return (tdict.get('name') or
                     tdict.get('team_name') or
                     tdict.get('nickname') or
                     str(tdict.get('team_id')))
 
         def extract_team_id(tdict):
+            if not isinstance(tdict, dict):
+                return None
             tid = tdict.get('team_id')
             if tid is None:
                 tkey = tdict.get('team_key')
@@ -617,7 +642,8 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
             return str(tid) if tid is not None else None
 
         def extract_stats(tdict):
-            # Yahoo dict içinde: 'team_stats': {'stats': [{stat_id, value}, ...]}
+            if not isinstance(tdict, dict):
+                return {}
             s_container = tdict.get('team_stats') or tdict.get('stats') or {}
             if isinstance(s_container, dict):
                 stats_list = s_container.get('stats', [])
@@ -627,6 +653,8 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
             if not isinstance(stats_list, list):
                 return result
             for st in stats_list:
+                if not isinstance(st, dict):
+                    continue
                 sid = str(st.get('stat_id'))
                 val = st.get('value')
                 label = stat_map.get(sid)
@@ -634,10 +662,29 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
                     result[label] = val
             return result
 
-        # --- 5) İlgili haftanın tüm matchuplarını al ---
-        matchups = lg.matchups(week)
+        # --- 5) matchups çıktısı list/dict olabilir, normalize et ---
+        matchups_raw = lg.matchups(week)
+
+        if isinstance(matchups_raw, dict):
+            if 'matchups' in matchups_raw and isinstance(matchups_raw['matchups'], list):
+                matchups = matchups_raw['matchups']
+            else:
+                matchups = []
+        elif isinstance(matchups_raw, list):
+            matchups = matchups_raw
+        else:
+            matchups = []
 
         for mu in matchups:
+            # Bazı durumlarda mu liste olabiliyor, içinden ilk dict'i seç
+            if isinstance(mu, list):
+                mu = next((x for x in mu if isinstance(x, dict)), None)
+                if mu is None:
+                    continue
+
+            if not isinstance(mu, dict):
+                continue
+
             teams_obj = mu.get('teams') or mu.get('team')
             if isinstance(teams_obj, dict) and 'team' in teams_obj:
                 tlist = teams_obj['team']
@@ -676,7 +723,53 @@ def get_weekly_totals_from_yahoo(lg, my_team_name, opp_team_name, week=None):
                 'opp': {'team_name': opp_name_final, 'stats': opp_stats}
             }
 
-        # Buraya gelindiyse ilgili iki takımı içeren matchup bulunamadı
+        # --- FALLBACK: Matchup bulunamadıysa direkt takımların stats'ını çek ---
+        my_team_key = None
+        opp_team_key = None
+
+        for _, info in league_teams.items():
+            tid = info.get("team_id")
+            if tid is None:
+                tkey = info.get("team_key", "")
+                if ".t." in str(tkey):
+                    tid = str(tkey).split(".t.")[-1]
+
+            if str(tid) == str(my_id):
+                my_team_key = info.get("team_key")
+            if str(tid) == str(opp_id):
+                opp_team_key = info.get("team_key")
+
+        if my_team_key and opp_team_key:
+            my_t_obj = lg.to_team(my_team_key)
+            opp_t_obj = lg.to_team(opp_team_key)
+
+            my_stats_raw = my_t_obj.stats(week)
+            opp_stats_raw = opp_t_obj.stats(week)
+
+            def parse_raw_stats(stats_list):
+                res = {}
+                if not isinstance(stats_list, list):
+                    return res
+                for st in stats_list:
+                    if not isinstance(st, dict):
+                        continue
+                    sid = str(st.get('stat_id'))
+                    val = st.get('value')
+                    label = stat_map.get(sid)
+                    if label in desired_labels:
+                        res[label] = val
+                return res
+
+            my_stats_final = parse_raw_stats(my_stats_raw)
+            opp_stats_final = parse_raw_stats(opp_stats_raw)
+
+            return {
+                'week': week,
+                'my':  {'team_name': my_team_name, 'stats': my_stats_final},
+                'opp': {'team_name': opp_team_name, 'stats': opp_stats_final}
+            }
+
+        # Buraya gelindiyse veri bulunamamış demektir
         return None
 
     except Exception as e:
@@ -845,7 +938,7 @@ if df is not None and not df.empty:
     c1.error(f"Hedeflenmesi Gereken Kategoriler: {', '.join(weak)}")
     c2.success(f"Güçlü Olduğun Kategoriler: {', '.join(strong)}")
     
-    t1, t2, t3 = st.tabs(["Kadro Analizi", "Takas Sihirbazı", "Rakip Analizi"])
+    t1, t2, t3, t4 = st.tabs(["Kadro Analizi", "Takas Sihirbazı", "Rakip Analizi", "Lig Durumu"])
     
     # -------------------------- Kadro --------------------------
     with t1:
@@ -944,6 +1037,55 @@ if df is not None and not df.empty:
     with t3:
         st.subheader("Rakip Karşılaştırma – Sezon, Haftalık Projeksiyon ve Eşleşme Analizi")
         st.caption(f"Hafta penceresi: {week_start.strftime('%d.%m.%Y')} + {num_days_int} gün.")
+
+        # --- Lig Geneli Z-Score Analizi ---
+        st.markdown("### 📊 Lig Geneli Takım Analizi (Güçlü/Zayıf Yönler)")
+        
+        # 1. Heatmap Expander
+        with st.expander("Detaylı Z-Score Isı Haritası", expanded=False):
+            cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
+            for c in cats:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors='coerce')
+            
+            team_stats = df.groupby('Team')[cats].mean()
+            
+            team_z = pd.DataFrame()
+            for c in cats:
+                m, s = team_stats[c].mean(), team_stats[c].std()
+                z = (team_stats[c] - m) / (s if s != 0 else 1)
+                team_z[c] = -z if c == 'TO' else z
+            
+            if "Free Agent" in team_z.index:
+                team_z = team_z.drop("Free Agent")
+                
+            st.dataframe(
+                team_z.style.format("{:.2f}").background_gradient(cmap='RdYlGn', axis=0),
+                use_container_width=True
+            )
+
+        # 2. Top 3 / Bottom 3 Summary
+        with st.expander("Takım Güç/Zayıflık Özeti (Top 3 / Bottom 3)", expanded=True):
+            analysis_data = []
+            for team in team_z.index:
+                z_scores = team_z.loc[team]
+                sorted_cats = z_scores.sort_values(ascending=False)
+                
+                top_3 = sorted_cats.head(3).index.tolist()
+                bottom_3 = sorted_cats.tail(3).index.tolist()
+                
+                top_3_str = ", ".join([f"{c} ({z_scores[c]:.1f})" for c in top_3])
+                bottom_3_str = ", ".join([f"{c} ({z_scores[c]:.1f})" for c in bottom_3])
+                
+                analysis_data.append({
+                    "Takım": team,
+                    "En Güçlü 3": top_3_str,
+                    "En Zayıf 3": bottom_3_str
+                })
+            
+            st.dataframe(pd.DataFrame(analysis_data), use_container_width=True, hide_index=True)
+        
+        # ---------------------------------------------
         ops = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
         op_a = st.selectbox("Rakip Takım Seç", ops)
         
@@ -953,7 +1095,6 @@ if df is not None and not df.empty:
             my_team_df = df[df['Team'] == MY_TEAM_NAME].copy()
             opp_team_df = df[df['Team'] == op_a].copy()
 
-            # numeric garanti
             for sub_df in (my_team_df, opp_team_df):
                 if 'Games_Next_7D' in sub_df.columns:
                     sub_df['Games_Next_7D'] = pd.to_numeric(sub_df['Games_Next_7D'], errors='coerce').fillna(0.0)
@@ -1034,7 +1175,11 @@ if df is not None and not df.empty:
 
             # ---- Haftalık Eşleşme Analizi ----
             with tab_matchup:
-                st.caption("Bu sekmede, seçtiğin rakibe karşı seçili hafta için maç sayıları ve tahmini üretim hesaplanır; 🔴 Sakatlar hariç. ESPN veri vermezse Games_Next_7D fallback kullanılır. En altta Yahoo’dan canlı gelen gerçekleşmiş toplamlar gösterilir.")
+                st.caption(
+                    "Bu sekmede, seçtiğin rakibe karşı seçili hafta için maç sayıları ve tahmini üretim hesaplanır; "
+                    "🔴 Sakatlar hariç. ESPN veri vermezse Games_Next_7D fallback kullanılır. "
+                    "En altta Yahoo’dan canlı gelen gerçekleşmiş toplamlar gösterilir."
+                )
 
                 sched_by_day = get_schedule_espn_by_day(week_start_str, num_days_int)
 
@@ -1102,10 +1247,14 @@ if df is not None and not df.empty:
 
                 st.markdown("#### Hafta İçi İlerleme (Bugüne Kadar / Kalan Günler)")
                 c4, c5 = st.columns(2)
-                c4.metric("Şu Ana Kadar Maç / FP (Sen / Rakip)",
-                          f"{past_my_games} / {past_opp_games} maç | {past_my_fp:.0f} / {past_opp_fp:.0f} FP")
-                c5.metric("Kalan Maç / FP (Sen / Rakip)",
-                          f"{future_my_games} / {future_opp_games} maç | {future_my_fp:.0f} / {future_opp_fp:.0f} FP")
+                c4.metric(
+                    "Şu Ana Kadar Maç / FP (Sen / Rakip)",
+                    f"{past_my_games} / {past_opp_games} maç | {past_my_fp:.0f} / {past_opp_fp:.0f} FP"
+                )
+                c5.metric(
+                    "Kalan Maç / FP (Sen / Rakip)",
+                    f"{future_my_games} / {future_opp_games} maç | {future_my_fp:.0f} / {future_opp_fp:.0f} FP"
+                )
 
                 st.markdown("#### Günlük Maç & FP Projeksiyonu (Sakatlar Hariç)")
                 st.dataframe(daily_df, use_container_width=True, hide_index=True)
@@ -1118,7 +1267,11 @@ if df is not None and not df.empty:
                 weekly_totals = get_weekly_totals_from_yahoo(lg, MY_TEAM_NAME, op_a)
 
                 if weekly_totals is None:
-                    st.info("Bu hafta için Yahoo canlı toplamları alınamadı (matchups() veya stat/ID eşleşmesi bulunamadı).")
+                    st.info(
+                        "Yahoo bu hafta için canlı toplam istatistik döndürmüyor. "
+                        "Bu genelde hafta henüz tam başlamadığında, playoff/konso haftalarında "
+                        "veya lig formatı desteklenmediğinde görülür. Yukarıdaki projeksiyonlar normal çalışıyor."
+                    )
                 else:
                     des_cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
                     my_stats = weekly_totals['my']['stats']
@@ -1139,3 +1292,138 @@ if df is not None and not df.empty:
                     )
                     yahoo_df = pd.DataFrame(table_rows)
                     st.dataframe(yahoo_df, use_container_width=True, hide_index=True)
+
+
+    # -------------------------- Lig Durumu --------------------------
+    with t4:
+        st.subheader("Lig Durumu – Haftalık Eşleşme Skorları")
+        
+        try:
+            # Mevcut haftanın tüm eşleşmelerini çek
+            week = lg.current_week()
+            matchups_raw = lg.matchups(week)
+            
+            # matchups çıktısı list veya dict olabilir, normalize et
+            if isinstance(matchups_raw, dict):
+                if 'matchups' in matchups_raw and isinstance(matchups_raw['matchups'], list):
+                    matchups = matchups_raw['matchups']
+                else:
+                    matchups = []
+            elif isinstance(matchups_raw, list):
+                matchups = matchups_raw
+            else:
+                matchups = []
+            
+            scoreboard_data = []
+            
+            cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
+            
+            # Stat map
+            cats_meta = lg.stat_categories()
+            stat_map = {}
+            for st_meta in cats_meta.get('stats', []):
+                sid = str(st_meta.get('stat_id'))
+                dname = st_meta.get('display_name') or st_meta.get('name')
+                stat_map[sid] = dname
+            
+            desired_labels = set(cats)
+            
+            for mu in matchups:
+                # Bazı durumlarda mu liste olabiliyor, içinden ilk dict'i çek
+                if isinstance(mu, list):
+                    mu = next((x for x in mu if isinstance(x, dict)), None)
+                    if mu is None:
+                        continue
+
+                if not isinstance(mu, dict):
+                    continue
+
+                # Takım verilerini ayrıştır
+                teams_obj = mu.get('teams') or mu.get('team')
+                if isinstance(teams_obj, dict) and 'team' in teams_obj:
+                    tlist = teams_obj['team']
+                else:
+                    tlist = teams_obj
+                
+                if not isinstance(tlist, list) or len(tlist) != 2:
+                    continue
+                    
+                t_a_data = tlist[0]
+                t_b_data = tlist[1]
+                
+                if not isinstance(t_a_data, dict) or not isinstance(t_b_data, dict):
+                    continue
+                
+                def get_name(t):
+                    if not isinstance(t, dict):
+                        return "Bilinmeyen"
+                    return t.get('name') or t.get('team_name') or "Bilinmeyen Takım"
+                
+                def get_stats_dict(t):
+                    if not isinstance(t, dict):
+                        return []
+                    s_container = t.get('team_stats') or t.get('stats') or {}
+                    if isinstance(s_container, dict):
+                        stats_list = s_container.get('stats', [])
+                    else:
+                        stats_list = s_container
+                    
+                    if not isinstance(stats_list, list):
+                        return []
+                    return stats_list
+                
+                def parse_stats(t_data):
+                    s_list = get_stats_dict(t_data)
+                    parsed = {}
+                    for s in s_list:
+                        if not isinstance(s, dict):
+                            continue
+                        sid = str(s.get('stat_id'))
+                        val = s.get('value')
+                        label = stat_map.get(sid)
+                        if label in desired_labels:
+                            if val in ('', '-'):
+                                parsed[label] = 0.0
+                            else:
+                                try:
+                                    parsed[label] = float(val)
+                                except ValueError:
+                                    parsed[label] = 0.0
+                    return parsed
+                
+                name_a = get_name(t_a_data)
+                name_b = get_name(t_b_data)
+                
+                stats_a = parse_stats(t_a_data)
+                stats_b = parse_stats(t_b_data)
+                
+                # Score hesapla
+                score_a = 0
+                score_b = 0
+                
+                for c in cats:
+                    val_a = stats_a.get(c, 0.0)
+                    val_b = stats_b.get(c, 0.0)
+                    
+                    # TO: düşük olan kazanır
+                    if c == 'TO':
+                        if val_a < val_b:
+                            score_a += 1
+                        elif val_b < val_a:
+                            score_b += 1
+                    else:
+                        if val_a > val_b:
+                            score_a += 1
+                        elif val_b > val_a:
+                            score_b += 1
+                        
+                scoreboard_data.append({
+                    "Takım A": name_a,
+                    "Skor": f"{score_a} - {score_b}",
+                    "Takım B": name_b
+                })
+            
+            st.dataframe(pd.DataFrame(scoreboard_data), use_container_width=True, hide_index=True)
+            
+        except Exception as e:
+            st.error(f"Lig durumu alınırken hata oluştu: {e}")
