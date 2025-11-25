@@ -1,9 +1,7 @@
 streamlit
 yahoo-fantasy-api
-yahoo_oauth
+yahoo-oauth
+nba_api
 pandas
 numpy
-
-openpyxl
-nba_api
 plotly
