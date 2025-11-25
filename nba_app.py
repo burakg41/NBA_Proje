@@ -20,7 +20,7 @@ except ImportError:
 # 🚨 TOKEN ALANI (DOLU VE HAZIR)
 # ==========================================
 MANUAL_TOKEN_DATA = {
-    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
+    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
     "consumer_key": "dj0yJmk9SnRUd2xhMzcwWThNJmQ9WVdrOWRHOXlkR1ZaVjJrbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTY5",
     "consumer_secret": "fed1b9a1af2b7d978917ed0d7401578e61ad29f8",
     "refresh_token": "AJ5rJGl_.0az6KK_IHrVgXaM8K.G~001~gz6NHZIiOKCi8PAws78as.8AqODjiPk-",
@@ -230,31 +230,34 @@ def process_player(meta, s_avg, s_total, s_m, t_name, owner, d_list, n_sched, nb
         
         # --- FORM DURUMU (YENİ MANTIK) ---
         st_c = meta.get('status','')
-        inj = "🟥 " + st_c if st_c in ['INJ','O'] else ("Rx " + st_c if st_c in ['GTD','DTD'] else "✅")
+        inj = "🔴 Sakat" if st_c in ['INJ', 'O'] else ("🟠 Riskli" if st_c in ['GTD','DTD'] else "🟢 Sağlıklı")
 
-        # Diff'i yine hesaplayalım, ileride kullanmak isteyebilirsin
-        diff = score_month - score_season
-
-        # Önce temel güvenlik kontrolleri
-        if "🟥" in inj:
-            trend = "🏥 Sakat"
-        elif gp < 5 or score_season < 5:
-            trend = "⚠️ Verisiz"
+        # Önce sakat / verisiz
+        if "🔴" in inj:
+            trend = "🔴 Sakat"
         else:
-            # 1) YÜKSELİŞTE KURALIN (MPG > 18 ve Skor > 20)
-            if (mpg > 18) and (score_season > 20):
-                trend = "↗️ Yükselişte"
+            if gp < 5 or score_season < 5:
+                trend = "⚪ Verisiz"
             else:
-                # 2) DAKİKA BANTLARI
-                if 24 >= mpg >= 18:
-                    trend = "🔁 Rotasyon Oyuncusu"
-                elif 18 > mpg >= 10:
-                    trend = "🧱 Az Oynayan"
-                elif 10 > mpg > 0:
-                    trend = "🧊 Nadir Oynayan"
+                # 1) Aşırı formda
+                if mpg >= 30 and score_season >= 30:
+                    trend = "🟣 Aşırı Formda"
+                # 2) Formda
+                elif 25 <= mpg <= 30 and 26 <= score_season <= 30:
+                    trend = "🟢 Formda"
+                # 3) Yükselişte
+                elif mpg > 18 and score_season > 20:
+                    trend = "🟡 Yükselişte"
                 else:
-                    # Çok düşük dakika / hiç oynamayan
-                    trend = "➖ Nötr"
+                    # Dakika bantları
+                    if 24 >= mpg >= 18:
+                        trend = "🔵 Rotasyon Oyuncusu"
+                    elif 18 > mpg >= 10:
+                        trend = "🟤 Az Oynayan"
+                    elif 10 > mpg > 0:
+                        trend = "⬛ Nadir Oynayan"
+                    else:
+                        trend = "⚪ Verisiz"
 
         d_list.append({
             'Player': name,
@@ -391,7 +394,7 @@ def get_z_and_trade_val(df, punt):
         df[f'z_{c}'] = -z if c == 'TO' else z
         
     df['Trade_Value'] = df[[f'z_{c}' for c in act]].sum(axis=1)
-    mask = df['Health'].str.contains('🟥|Rx')
+    mask = df['Health'].str.contains('🔴|🟠')
     df.loc[mask, 'Trade_Value'] *= 0.5
     
     return df, act
@@ -405,32 +408,63 @@ def analyze_needs(df, my_team, act):
     return [x.replace('z_','') for x in tot.head(3).index], [x.replace('z_','') for x in tot.tail(3).index]
 
 def analyze_trade_scenario(give, recv, my_needs):
+    # Toplam trade değerleri
     val_give = sum([p['Trade_Value'] for p in give])
     val_recv = sum([p['Trade_Value'] for p in recv])
     slot_adv = (len(give) - len(recv)) * 0.5
-    net_diff = val_recv - val_give + slot_adv
-    
+    net_diff = val_recv - val_give + slot_adv  # takas sonrası senin kazanımın
+
+    # Mantıklı aralıktaysa senaryo üret
     if net_diff > 0.5 and (val_give - val_recv) > -4.0:
+        # Kategori bazlı etki hesapla
+        example = give[0]
+        z_cols = [c for c in example.index if c.startswith('z_')]
+        cat_impacts = []
+        for zc in z_cols:
+            cat = zc.replace('z_', '')
+            sum_recv = sum([p.get(zc, 0.0) for p in recv])
+            sum_give = sum([p.get(zc, 0.0) for p in give])
+            delta = sum_recv - sum_give
+            cat_impacts.append((cat, delta))
+
+        # Mutlak değeri en yüksek ilk 4 kategori
+        cat_impacts.sort(key=lambda x: abs(x[1]), reverse=True)
+        top_impacts = cat_impacts[:4]
+        etkistr = ", ".join([f"{c}:{d:+.2f}" for c, d in top_impacts])
+
+        # İhtiyaç karşılanan kategoriler
         needs_met = list(set([
             c for p in recv for c in my_needs
             if p.get(f'z_{c}', 0) > 0.5
         ]))
         strategic_score = net_diff + (len(needs_met) * 1.2)
         
-        has_injured = any(["🟥" in p['Health'] for p in recv])
+        # Sakatlık uyarısı
+        has_injured = any(["🔴" in p['Health'] or "🟠" in p['Health'] for p in recv])
         warn = "⚠️ RİSKLİ" if has_injured else "Temiz"
         
+        # Oyuncu stringleri
         g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
         r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
         
+        # Şans (kabul edilme ihtimali)
         ratio = val_give / val_recv if val_recv != 0 else 0
-        acc = "🔥 Çok Yüksek" if ratio > 0.9 else ("✅ Yüksek" if ratio > 0.75 else "🤔 Orta")
+        if ratio < 0.6 or ratio > 1.4:
+            acc = "⚪ Düşük"
+        else:
+            if net_diff >= 2.0:
+                acc = "🔥 Çok Yüksek"
+            elif net_diff >= 1.0:
+                acc = "✅ Yüksek"
+            else:
+                acc = "🟡 Orta"
         
         return {
             'Senaryo': f"{len(give)}v{len(recv)}",
             'Verilecekler': g_str,
             'Alınacaklar': r_str,
             'Puan': round(strategic_score, 1),
+            'Kategori_Etkisi': etkistr,
             'Durum': warn,
             'Şans': acc
         }
@@ -501,7 +535,7 @@ if df is not None and not df.empty:
     df, act = get_z_and_trade_val(df, punt)
     weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
     
-    v_df = df[~df['Health'].str.contains("🟥")] if hide_inj else df.copy()
+    v_df = df[~df['Health'].str.contains("🔴")] if hide_inj else df.copy()
     
     c1, c2 = st.columns(2)
     c1.error(f"Hedefler: {', '.join(weak)}")
