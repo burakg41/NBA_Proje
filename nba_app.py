@@ -12,23 +12,39 @@ import itertools
 from datetime import datetime, timedelta
 
 # ==========================================
-# AYARLAR & SABİTLER
+# 🚨 KRİTİK BÖLGE: TOKEN'I BURAYA YAPIŞTIR
+# ==========================================
+# oauth2.json dosyanın içindeki süslü parantezli tüm yazıyı
+# aşağıdaki boşluğa olduğu gibi yapıştır.
+# Tırnak hatalarına dikkat et.
+
+
+MANUAL_TOKEN_DATA = {
+    "access_token": "XIO1Yt6au1D4JjQEytWw6fa.gvPesJiOJp.N.ckuYd5ugIsSa44Xv0PQX50MtEqnoSW2l5_7U4QoBD_N174o5aV5FP0yB53w3i4Op_36Ep..g18BwNcSjGjpjD5yZd7c2ThoFR_0GbS.FfQRB80vtPrrIINSqlGC2M1hP1nm4n8bZ2FIj148N85339BL96nWYD7Wl9cJRQKp59bcfiwzSiR2jM9QLwSyY2BQ4PAsbyPAxLDMY2tNnps_SpZ8q7lKMOcRFhImoz0meHJJpKv0jFKKdEFV2osFqHujXkt_lCdgaKYaVXztRpVcP5NUvMRwMFNQIzYi920wPuM0E3PQVY60J0iSert7JZx5BDeOpMQytJyRn3ifSW6Z8I4Nnw989TSqp7g6RzY3X_2K.RP6f5Ilh6tnQqBVGmFghAH8p2RXEcHTQ0doZdNJx6rgqdUZbYLjOVuaJ3aPxhravng4XCNBHmfIXT8puLiBU7wyf_i1VftO.5Spi8wj7s0gPmQ6THG44INVJVn2t83CfWI.J6XDImBTZXoZGLFb1sbDR_CRwJi_ksAeVKc2Z3OuThFRrrzb04UIafrVGeuXbWSX7FVqbtw295k07FD4gBVxt9m7yjknyCusNgO2Rhlp5zT9SEMGc5KR1W4h5kcIFuR6_irgwm2cOJT.J7CZK1oOuUdVFgSHG3fmGPqVUtiu7YxYZo_z6rspctv78HYJG64Olt0r0XNOX6n2HtTGvvycw5y6BTVwemhXObMhaKMWiy4GTc5e.oRouiotNFIntLYD9JpP8t1MMSE5UYi6ETQU6R8Ne.9KHrR6wLAqfP0MAUL_9bPZsj9uHQpkOtNq_5Y2Ukqb1KmiIb2ncmYTriZ99bULdEfp05..FbZKQE95y0qRSNrXEwZ.ZD7.TvGky0fb9MF7bbijhw5MgrX92HSYqDWpE7.5IvPJCP0uv.zcNZG8nd1xHhEbFL_HYdGyTJGCBxs-",
+    "consumer_key": "dj0yJmk9SnRUd2xhMzcwWThNJmQ9WVdrOWRHOXlkR1ZaVjJrbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTY5",
+    "consumer_secret": "fed1b9a1af2b7d978917ed0d7401578e61ad29f8",
+    "refresh_token": "AJ5rJGl_.0az6KK_IHrVgXaM8K.G~001~gz6NHZIiOKCi8PAws78as.8AqODjiPk-",
+    "token_time": 1764052012.0662093,
+    "token_type": "bearer"
+}
+
+# ==========================================
+# AYARLAR
 # ==========================================
 SEASON_YEAR = 2025  
 TARGET_LEAGUE_ID = "61142"  
 MY_TEAM_NAME = "Burak's Wizards" 
 ANALYSIS_TYPE = 'average_season' 
 
-st.set_page_config(page_title="Burak's GM Dashboard v9.4 (Unstoppable)", layout="wide", page_icon="🏀")
+st.set_page_config(page_title="Burak's GM v9.5", layout="wide", page_icon="🏀")
 
-# --- NBA API (Opsiyonel - Varsa kullan, yoksa geç) ---
+# --- NBA API ---
 try:
     from nba_api.stats.endpoints import leaguedashplayerstats
     NBA_API_AVAILABLE = True
 except ImportError:
     NBA_API_AVAILABLE = False
 
-# Takım Eşleştirme
 TEAM_MAPPER = {
     'ATL': 'ATL', 'BOS': 'BOS', 'BKN': 'BKN', 'CHA': 'CHA', 'CHI': 'CHI',
     'CLE': 'CLE', 'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GS': 'GSW', 'GSW': 'GSW',
@@ -40,420 +56,305 @@ TEAM_MAPPER = {
 }
 
 # ==========================================
-# 1. VERİ ÇEKME MOTORU (HATA KORUMALI)
+# AUTH VE VERİ FONKSİYONLARI
 # ==========================================
+
+def authenticate_direct():
+    """
+    Dosya veya Secrets okumaz. 
+    Doğrudan kodun içindeki MANUAL_TOKEN_DATA değişkenini kullanır.
+    """
+    # Eğer kullanıcı veriyi yapıştırmamışsa uyarı ver
+    if MANUAL_TOKEN_DATA.get("consumer_key") == "BURAYA_YAPISTIR":
+        st.error("🚨 Lütfen kodun en üstündeki MANUAL_TOKEN_DATA kısmına oauth2.json içeriğini yapıştırın!")
+        st.stop()
+
+    try:
+        # Geçici dosya oluştur (Kütüphane dosya istiyor)
+        with open('temp_auth.json', 'w') as f:
+            json.dump(MANUAL_TOKEN_DATA, f)
+        
+        sc = OAuth2(None, None, from_file='temp_auth.json')
+        
+        # Token yenileme denemesi
+        if not sc.token_is_valid():
+            # Token yenilemeye çalış, olmazsa sessizce devam et (bazen validasyon yanıltır)
+            try: sc.refresh_access_token()
+            except: pass
+            
+        return sc
+    except Exception as e:
+        st.error(f"Auth Hatası: {e}")
+        return None
 
 @st.cache_data(ttl=3600)
 def get_nba_real_stats():
-    """
-    NBA.com'dan istatistik çeker.
-    TIMEOUT: 3 Saniye. Eğer cevap vermezse anında pes eder ve boş döner.
-    Böylece uygulama donmaz.
-    """
+    """NBA API - Timeout 5 sn. Asla kilitlemez."""
     if not NBA_API_AVAILABLE: return {}
-    
-    custom_headers = {
-        'Host': 'stats.nba.com',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.nba.com/',
-        'Connection': 'keep-alive'
-    }
-
     try:
-        # ÇOK KISA TIMEOUT (3 sn) - Cloud IP'si blokluysa bekleme yapma
+        custom_headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.nba.com/'}
         stats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season='2025-26', 
-            per_mode_detailed='PerGame',
-            timeout=3, 
-            headers=custom_headers
+            season='2025-26', per_mode_detailed='PerGame', timeout=5, headers=custom_headers
         )
         df = stats.get_data_frames()[0]
         nba_data = {}
         for index, row in df.iterrows():
-            clean_name = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
-            nba_data[clean_name] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
+            clean = row['PLAYER_NAME'].lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
+            nba_data[clean] = {'GP': row['GP'], 'MPG': row['MIN'], 'TEAM': row['TEAM_ABBREVIATION']}
         return nba_data
-    except Exception:
-        # Hata ne olursa olsun (Timeout, Connection vb.) boş dön.
-        return {} 
+    except: return {}
 
 @st.cache_data(ttl=3600)
-def get_schedule_espn():
-    """ESPN API (Hızlı Fikstür)."""
-    team_game_counts = {}
-    today = datetime.now()
-    
+def get_schedule_robust():
+    """Fikstür - ESPN veya Simülasyon."""
+    team_counts = {}
     try:
         for i in range(7):
-            date_str = (today + timedelta(days=i)).strftime('%Y%m%d')
+            date_str = (datetime.now() + timedelta(days=i)).strftime('%Y%m%d')
             url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={date_str}"
             r = requests.get(url, timeout=2)
             if r.status_code == 200:
-                data = r.json()
-                for event in data.get('events', []):
-                    for competition in event.get('competitions', []):
-                        for competitor in competition.get('competitors', []):
-                            abbr = competitor['team']['abbreviation']
-                            std_abbr = TEAM_MAPPER.get(abbr, abbr)
-                            team_game_counts[std_abbr] = team_game_counts.get(std_abbr, 0) + 1
+                for ev in r.json().get('events', []):
+                    for comp in ev.get('competitions', []):
+                        for c in comp.get('competitors', []):
+                            abbr = c['team']['abbreviation']
+                            std = TEAM_MAPPER.get(abbr, abbr)
+                            team_counts[std] = team_counts.get(std, 0) + 1
             time.sleep(0.05)
-        return team_game_counts
-    except:
-        # Hata varsa simülasyon dön
-        sim = {}
-        for t in TEAM_MAPPER.values(): sim[t] = 3
-        return sim
+    except: pass
 
-def authenticate_yahoo_ui():
-    """
-    1. Secrets kontrol eder.
-    2. Dosya kontrol eder.
-    3. İkisi de yoksa UI'dan input bekler.
-    """
-    # 1. SECRETS
-    if 'yahoo_auth' in st.secrets:
-        try:
-            with open('oauth2.json', 'w') as f:
-                json.dump(dict(st.secrets['yahoo_auth']), f)
-        except: pass
+    if len(team_counts) < 5: # Fallback
+        for t in TEAM_MAPPER.values(): team_counts[t] = 3
+    return team_counts
 
-    # 2. DOSYA VARSA DENE
-    if os.path.exists('oauth2.json'):
-        try:
-            sc = OAuth2(None, None, from_file='oauth2.json')
-            if not sc.token_is_valid():
-                sc.refresh_access_token()
-            return sc
-        except: pass
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_data():
+    status = st.status("Yükleniyor...", expanded=True)
     
-    return None
+    # 1. Auth (En kritik adım)
+    status.write("🔐 Giriş yapılıyor...")
+    sc = authenticate_direct()
+    if not sc: st.stop()
 
-# ==========================================
-# LOAD DATA (GÜVENLİ MOD)
-# ==========================================
-def load_data_safe():
-    # --- YAN PANEL TOKEN GİRİŞİ (ACİL DURUM) ---
-    st.sidebar.header("🔐 Acil Durum Girişi")
-    manual_token = st.sidebar.text_area("Eğer 'Running'de kalıyorsa, oauth2.json içeriğini buraya yapıştırın:")
-    
-    if manual_token:
-        try:
-            with open('oauth2.json', 'w') as f:
-                f.write(manual_token)
-            st.sidebar.success("Token kaydedildi! Sayfa yenileniyor...")
-            time.sleep(1)
-            st.rerun()
-        except:
-            st.sidebar.error("Geçersiz format.")
+    # 2. Veriler
+    status.write("📅 Fikstür ve İstatistikler...")
+    nba_schedule = get_schedule_robust()
+    nba_stats = get_nba_real_stats()
 
-    status = st.status("Veriler Yükleniyor...", expanded=True)
-    
-    # 1. Fikstür
-    status.write("📅 Fikstür çekiliyor...")
-    nba_schedule = get_schedule_espn()
-    
-    # 2. İstatistikler (Hata verirse boş geç)
-    status.write("📊 İstatistikler (NBA) deneniyor...")
-    nba_stats_dict = get_nba_real_stats()
-    if not nba_stats_dict:
-        status.write("⚠️ NBA Sunucusu yanıt vermedi. Sadece Yahoo verileri kullanılacak.")
-    
-    # 3. Auth
-    status.write("🔐 Kimlik doğrulanıyor...")
-    sc = authenticate_yahoo_ui()
-    
-    if not sc:
-        status.update(label="Giriş Yapılamadı", state="error")
-        st.error("### 🛑 Giriş Başarısız!")
-        st.warning("Lütfen 'oauth2.json' dosyasının içeriğini kopyalayıp sol taraftaki kutuya yapıştırın.")
-        st.stop() # Uygulamayı burada durdur, hata fırlatma.
-
+    # 3. Yahoo
+    status.write("📥 Yahoo Verileri...")
     try:
         gm = yfa.Game(sc, 'nba')
-        league_ids = gm.league_ids(year=SEASON_YEAR)
-        target_lid = next((lid for lid in league_ids if TARGET_LEAGUE_ID in lid), None)
+        t_lid = next((l for l in gm.league_ids(year=SEASON_YEAR) if TARGET_LEAGUE_ID in l), None)
+        if not t_lid: st.error("Lig Bulunamadı"); st.stop()
         
-        if not target_lid:
-            st.error(f"Lig ID {TARGET_LEAGUE_ID} bulunamadı.")
-            st.stop()
-
-        lg = gm.to_league(target_lid)
+        lg = gm.to_league(t_lid)
         teams = lg.teams()
         all_data = []
         
-        status.write("📥 Takım verileri indiriliyor...")
         prog = status.progress(0)
-        
-        for idx, team_key in enumerate(teams.keys()):
-            t_name = teams[team_key]['name']
+        for idx, t_key in enumerate(teams.keys()):
             try:
-                roster = lg.to_team(team_key).roster()
+                roster = lg.to_team(t_key).roster()
                 p_ids = [p['player_id'] for p in roster]
                 if p_ids:
-                    stats_s = lg.player_stats(p_ids, ANALYSIS_TYPE)
-                    try: stats_m = lg.player_stats(p_ids, 'lastmonth')
-                    except: stats_m = stats_s
-                    
+                    s_s = lg.player_stats(p_ids, ANALYSIS_TYPE)
+                    try: s_m = lg.player_stats(p_ids, 'lastmonth')
+                    except: s_m = s_s
                     for i, pm in enumerate(roster):
-                        if i < len(stats_s):
-                            m_stat = stats_m[i] if i < len(stats_m) else stats_s[i]
-                            process_player(pm, stats_s[i], m_stat, t_name, "Sahipli", all_data, nba_stats_dict, nba_schedule)
+                        if i < len(s_s):
+                            m_stat = s_m[i] if i < len(s_m) else s_s[i]
+                            process_player(pm, s_s[i], m_stat, teams[t_key]['name'], "Sahipli", all_data, nba_stats, nba_schedule)
             except: pass
             prog.progress((idx + 1) / (len(teams) + 1))
-
-        # Free Agents (Limitli)
-        status.write("🆓 Free Agents...")
+            
+        # Free Agents
         try:
-            fa_players = lg.free_agents(None)[:60]
-            fa_ids = [p['player_id'] for p in fa_players]
+            fa_p = lg.free_agents(None)[:60]
+            fa_ids = [p['player_id'] for p in fa_p]
             if fa_ids:
-                stats_s = lg.player_stats(fa_ids, ANALYSIS_TYPE)
-                try: stats_m = lg.player_stats(fa_ids, 'lastmonth')
-                except: stats_m = stats_s
-                for k, pm in enumerate(fa_players):
-                    if k < len(stats_s):
-                        m_stat = stats_m[k] if k < len(stats_m) else stats_s[k]
-                        process_player(pm, stats_s[k], m_stat, "🆓 FA", "Free Agent", all_data, nba_stats_dict, nba_schedule)
+                s_s = lg.player_stats(fa_ids, ANALYSIS_TYPE)
+                try: s_m = lg.player_stats(fa_ids, 'lastmonth')
+                except: s_m = s_s
+                for k, pm in enumerate(fa_p):
+                    if k < len(s_s):
+                        m_stat = s_m[k] if k < len(s_m) else s_s[k]
+                        process_player(pm, s_s[k], m_stat, "🆓 FA", "Free Agent", all_data, nba_stats, nba_schedule)
         except: pass
         
-        prog.progress(1.0)
-        status.update(label="Hazır!", state="complete", expanded=False)
+        status.update(label="Bitti!", state="complete", expanded=False)
         return pd.DataFrame(all_data), lg
-        
     except Exception as e:
-        st.error(f"Veri işleme hatası: {e}")
+        st.error(f"Hata: {e}")
         return None, None
 
-def process_player(meta, stat_s, stat_m, team_name, ownership, data_list, nba_dict, nba_schedule):
+def process_player(meta, s_s, s_m, t_name, owner, d_list, n_dict, n_sched):
     try:
-        def val(v):
-            if v == '-' or v is None: return 0.0
-            try: return float(v)
-            except: return 0.0
-
+        def v(x): return float(x) if x not in ['-', None] else 0.0
         name = meta['name']
-        raw_pos = meta.get('display_position', '').replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F')
-        pos_set = set(raw_pos.split(','))
-        order = {'G':1, 'F':2, 'C':3}
-        final_pos = "/".join(sorted(list(pos_set), key=lambda x: order.get(x, 9)))
-
-        # NBA Verisi YOKSA 0 Bas (Çökmesin)
-        real_gp, real_mpg, nba_team = 0, 0.0, "N/A"
-        if nba_dict:
-            c_name = name.lower().replace('.', '').replace("'", "").replace('-', ' ').strip()
-            if c_name in nba_dict:
-                real_gp = nba_dict[c_name]['GP']
-                real_mpg = nba_dict[c_name]['MPG']
-                nba_team = nba_dict[c_name]['TEAM']
+        pos = "/".join(sorted(list(set(meta.get('display_position','').replace('PG','G').replace('SG','G').replace('SF','F').replace('PF','F').split(',')))))
         
-        if nba_team == "N/A":
-            y_abbr = meta.get('editorial_team_abbr', 'N/A').upper()
-            nba_team = TEAM_MAPPER.get(y_abbr, y_abbr)
-
-        games_7d = nba_schedule.get(nba_team, 3) # Varsayılan 3
+        # NBA Match
+        c_name = name.lower().replace('.','').replace("'",'').replace('-',' ').strip()
+        gp, mpg, team = 0, 0.0, "N/A"
+        if c_name in n_dict:
+            gp, mpg, team = n_dict[c_name]['GP'], n_dict[c_name]['MPG'], n_dict[c_name]['TEAM']
+        if team == "N/A": 
+            team = TEAM_MAPPER.get(meta.get('editorial_team_abbr','').upper(), 'N/A')
+            
+        g7 = n_sched.get(team, 3)
         
-        st_code = meta.get('status', '')
-        is_injured = st_code in ['INJ', 'O', 'GTD', 'DTD']
-        inj_str = f"🟥 {st_code}" if st_code in ['INJ', 'O'] else (f"Rx {st_code}" if is_injured else "✅")
-
-        def f_score(s):
-            return (val(s.get('PTS')) + val(s.get('REB'))*1.2 + val(s.get('AST'))*1.5 + 
-                    val(s.get('ST'))*3 + val(s.get('BLK'))*3 - val(s.get('TO')))
+        # Status
+        st_c = meta.get('status','')
+        inj = "🟥 "+st_c if st_c in ['INJ','O'] else ("Rx "+st_c if st_c in ['GTD','DTD'] else "✅")
         
-        fs_s = f_score(stat_s)
-        fs_m = f_score(stat_m)
-        
+        # Trend
+        def fs(x): return v(x.get('PTS'))+v(x.get('REB'))*1.2+v(x.get('AST'))*1.5+v(x.get('ST'))*3+v(x.get('BLK'))*3-v(x.get('TO'))
+        f1, f2 = fs(s_s), fs(s_m)
+        diff = f2 - f1
         trend = "➖"
-        if is_injured: trend = "🏥"
-        elif abs(fs_s - fs_m) < 0.2: trend = "➖"
-        else:
-            diff = fs_m - fs_s
-            if diff > 5.5: trend = "🔥"
-            elif diff > 2.5: trend = "↗️"
-            elif diff < -5.0: trend = "🥶"
-            elif diff < -2.0: trend = "↘️"
+        if "🟥" in inj: trend = "🏥"
+        elif abs(diff) > 5.5: trend = "🔥" if diff > 0 else "🥶"
+        elif abs(diff) > 2.5: trend = "↗️" if diff > 0 else "↘️"
 
-        data_list.append({
-            'Player': name, 'Team': team_name, 'Real_Team': nba_team,
-            'Owner_Status': ownership, 'Pos': final_pos, 'Health': inj_str, 'Trend': trend,
-            'Games_Next_7D': int(games_7d), 'GP': int(real_gp), 'MPG': float(real_mpg),
-            'FG%': val(stat_s.get('FG%'))*100, 'FT%': val(stat_s.get('FT%'))*100, 
-            '3PTM': val(stat_s.get('3PTM')), 'PTS': val(stat_s.get('PTS')), 
-            'REB': val(stat_s.get('REB')), 'AST': val(stat_s.get('AST')), 
-            'ST': val(stat_s.get('ST')), 'BLK': val(stat_s.get('BLK')), 
-            'TO': val(stat_s.get('TO'))
+        d_list.append({
+            'Player': name, 'Team': t_name, 'Real_Team': team, 'Owner_Status': owner,
+            'Pos': pos, 'Health': inj, 'Trend': trend, 'Games_Next_7D': int(g7),
+            'GP': int(gp), 'MPG': float(mpg), 'FG%': v(s_s.get('FG%'))*100, 
+            'FT%': v(s_s.get('FT%'))*100, '3PTM': v(s_s.get('3PTM')), 'PTS': v(s_s.get('PTS')),
+            'REB': v(s_s.get('REB')), 'AST': v(s_s.get('AST')), 'ST': v(s_s.get('ST')),
+            'BLK': v(s_s.get('BLK')), 'TO': v(s_s.get('TO'))
         })
     except: pass
 
-def calculate_z_scores(df, punt_list):
-    cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
-    active = [c for c in cats if c not in punt_list]
-    if df.empty: return df, active
+# ==========================================
+# ANALİZ
+# ==========================================
+def get_z(df, punt):
+    cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
+    act = [c for c in cats if c not in punt]
+    if df.empty: return df, act
     for c in cats:
-        if c in punt_list: 
-            df[f'z_{c}'] = 0.0; continue
-        mean = df[c].mean(); std = df[c].std()
-        if std == 0: std = 1
-        z = (df[c] - mean) / std
-        if c == 'TO': z = -z 
-        df[f'z_{c}'] = z
-    df['Genel_Kalite'] = df[[f'z_{c}' for c in active]].sum(axis=1)
-    return df, active
+        if c in punt: df[f'z_{c}'] = 0.0; continue
+        m, s = df[c].mean(), df[c].std()
+        z = (df[c]-m)/(s if s!=0 else 1)
+        df[f'z_{c}'] = -z if c=='TO' else z
+    df['Genel_Kalite'] = df[[f'z_{c}' for c in act]].sum(axis=1)
+    return df, act
 
-def score_players_weighted(df, targets, active_cats):
+def score_w(df, targets, act):
     df['Skor'] = 0.0
-    for c in active_cats:
-        col = f'z_{c}'
-        weight = 1.0
-        if c in targets: weight = 1.5 
-        if col in df.columns: df['Skor'] += df[col] * weight
+    for c in act:
+        w = 1.5 if c in targets else 1.0
+        if f'z_{c}' in df.columns: df['Skor'] += df[f'z_{c}'] * w
+    # Sakatlık Cezası
     df['Trade_Value'] = df['Skor']
-    mask_injured = df['Health'].str.contains('🟥|Rx')
-    df.loc[mask_injured, 'Trade_Value'] = df.loc[mask_injured, 'Skor'] * 0.5
+    mask = df['Health'].str.contains('🟥|Rx')
+    df.loc[mask, 'Trade_Value'] *= 0.5
     return df
 
-def analyze_needs(df, my_team, active_cats):
+def analyze_needs(df, my_team, act):
     m_df = df[df['Team'].str.strip() == my_team.strip()]
     if m_df.empty: return [], []
-    z_cols = [f'z_{c}' for c in active_cats]
-    totals = m_df[z_cols].sum().sort_values()
-    return [x.replace('z_', '') for x in totals.head(3).index], [x.replace('z_', '') for x in totals.tail(3).index]
+    z_cols = [f'z_{c}' for c in act]
+    tot = m_df[z_cols].sum().sort_values()
+    return [x.replace('z_','') for x in tot.head(3).index], [x.replace('z_','') for x in tot.tail(3).index]
 
-def trade_engine_grouped(df, my_team, target_opp, my_needs):
-    safe_me = my_team.strip()
-    safe_opp = target_opp.strip()
+def trade_engine(df, me, opp, needs):
+    me, opp = me.strip(), opp.strip()
+    my_roster = df[df['Team'].str.strip()==me].sort_values('Trade_Value').head(10)
+    op_roster = df[df['Team'].str.strip()==opp].sort_values('Trade_Value', ascending=False).head(10)
     
-    my_roster = df[df['Team'].str.strip() == safe_me].sort_values(by='Trade_Value', ascending=True)
-    opp_roster = df[df['Team'].str.strip() == safe_opp].sort_values(by='Trade_Value', ascending=False)
+    groups = {"Küçük": [], "Orta": [], "Büyük": [], "Devasa": []}
     
-    my_assets = my_roster.head(10) 
-    opp_assets = opp_roster.head(10)
-    
-    groups = {
-        "Küçük (1-2 Oyuncu)": [], "Orta (2-3 Oyuncu)": [], 
-        "Büyük (3-4 Oyuncu)": [], "Devasa (4 Oyuncu)": []
-    }
-    
-    for n_give in range(1, 5):
-        for n_recv in range(1, 5):
-            if abs(n_give - n_recv) > 1: continue
+    for ng in range(1, 5):
+        for nr in range(1, 5):
+            if abs(ng-nr) > 1: continue
+            gn = "Küçük" if ng+nr<=3 else ("Orta" if ng+nr<=5 else ("Büyük" if ng+nr<=7 else "Devasa"))
             
-            total_p = n_give + n_recv
-            if total_p <= 3: g_name = "Küçük (1-2 Oyuncu)"
-            elif total_p <= 5: g_name = "Orta (2-3 Oyuncu)"
-            elif total_p <= 7: g_name = "Büyük (3-4 Oyuncu)"
-            else: g_name = "Devasa (4 Oyuncu)"
+            m_com = list(itertools.combinations(my_roster.index, ng))
+            o_com = list(itertools.combinations(op_roster.index, nr))
+            if len(m_com)*len(o_com) > 400: m_com, o_com = m_com[:15], o_com[:15]
             
-            my_combos = list(itertools.combinations(my_assets.index, n_give))
-            opp_combos = list(itertools.combinations(opp_assets.index, n_recv))
-            
-            if len(my_combos) * len(opp_combos) > 500:
-                my_combos = my_combos[:15]; opp_combos = opp_combos[:15]
-            
-            for m_idx in my_combos:
-                for o_idx in opp_combos:
-                    g_list = [df.loc[i] for i in m_idx]
-                    r_list = [df.loc[i] for i in o_idx]
-                    res = analyze_trade_scenario(g_list, r_list, my_needs)
-                    if res: groups[g_name].append(res)
+            for mi in m_com:
+                for oi in o_com:
+                    gl = [df.loc[i] for i in mi]
+                    rl = [df.loc[i] for i in oi]
+                    
+                    vg, vr = sum([p['Trade_Value'] for p in gl]), sum([p['Trade_Value'] for p in rl])
+                    net = vr - vg + (len(gl)-len(rl))*0.8
+                    
+                    if net > 0.5 and (vg-vr) > -4.0:
+                        nm = list(set([c for p in rl for c in needs if p.get(f'z_{c}',0)>0.5]))
+                        sc = net + len(nm)*1.5
+                        warn = "⚠️ SAKAT" if any(["🟥" in p['Health'] for p in rl]) else "Temiz"
+                        acc = "🔥 Yüksek" if (vg/vr if vr else 0) > 0.9 else "✅ Orta"
+                        
+                        groups[gn].append({
+                            'Senaryo': f"{len(gl)}v{len(rl)}",
+                            'Ver': ", ".join([p['Player'] for p in gl]),
+                            'Al': ", ".join([p['Player'] for p in rl]),
+                            'Puan': round(sc, 1), 'Durum': warn, 'Şans': acc
+                        })
     
-    result_dfs = {}
-    for g_name, data in groups.items():
-        if data: result_dfs[g_name] = pd.DataFrame(data).sort_values(by='Puan', ascending=False)
-        else: result_dfs[g_name] = pd.DataFrame()
-    return result_dfs
-
-def analyze_trade_scenario(give, recv, my_needs):
-    val_give = sum([p['Trade_Value'] for p in give])
-    val_recv = sum([p['Trade_Value'] for p in recv])
-    slot_adv = (len(give) - len(recv)) * 0.8
-    net_diff = val_recv - val_give + slot_adv
-    
-    if net_diff > 0.5 and (val_give - val_recv) > -4.0:
-        needs_met = []
-        for p in recv:
-            for cat in my_needs:
-                if p.get(f'z_{cat}', 0) > 0.5: needs_met.append(cat)
-        needs_met = list(set(needs_met))
-        strategic_score = net_diff + (len(needs_met) * 1.5)
-        
-        has_injured = any(["🟥" in p['Health'] for p in recv])
-        warn = "⚠️ RİSKLİ (SAKAT)" if has_injured else "Temiz"
-        
-        g_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in give])
-        r_str = ", ".join([f"{p['Player']} ({p['Pos']})" for p in recv])
-        
-        ratio = val_give / val_recv if val_recv != 0 else 0
-        acc = "🔥 Çok Yüksek" if ratio > 0.9 else ("✅ Yüksek" if ratio > 0.75 else "🤔 Orta")
-        
-        return {'Senaryo': f"{len(give)}v{len(recv)}", 'Verilecekler': g_str, 'Alınacaklar': r_str, 'Puan': round(strategic_score, 1), 'Durum': warn, 'Kabul İhtimali': acc}
-    return None
+    res = {}
+    for k, v in groups.items(): res[k] = pd.DataFrame(v).sort_values('Puan', ascending=False) if v else pd.DataFrame()
+    return res
 
 # ==========================================
-# MAIN APP
+# APP
 # ==========================================
-
-st.title("🏀 Burak's GM Dashboard v9.4 (Unstoppable)")
+st.title("🏀 Burak's GM Dashboard v9.5 (Direct Injection)")
 
 with st.sidebar:
-    st.header("Ayarlar")
-    if st.button("🔄 Verileri Yenile", type="primary"):
-        st.cache_data.clear()
-        st.rerun()
-    hide_injured = st.checkbox("Sakatları Listeden Gizle", value=False)
-    st.markdown("---")
-    punt_cats = st.multiselect("Punt:", ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO'])
+    if st.button("Yenile"): st.cache_data.clear(); st.rerun()
+    hide_inj = st.checkbox("Sakatları Gizle")
+    punt = st.multiselect("Punt", ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO'])
 
-df, lg = load_data_safe() # GÜVENLİ LOAD FONKSİYONU
+df, lg = load_data()
 
 if df is not None and not df.empty:
     df['Team'] = df['Team'].astype(str).str.strip()
-    df, active_cats = calculate_z_scores(df, punt_cats)
-    weak, strong = analyze_needs(df, MY_TEAM_NAME, active_cats)
-    df = score_players_weighted(df, weak, active_cats)
+    df, act = get_z(df, punt)
+    weak, strong = analyze_needs(df, MY_TEAM_NAME, act)
+    df = score_w(df, weak, act)
     
-    view_df = df.copy()
-    if hide_injured: view_df = view_df[~view_df['Health'].str.contains("🟥")]
-
+    v_df = df[~df['Health'].str.contains("🟥")] if hide_inj else df.copy()
+    
     c1, c2 = st.columns(2)
-    c1.error(f"📉 Hedefler: {', '.join(weak)}")
-    c2.success(f"📈 Güçlü Yönler: {', '.join(strong)}")
+    c1.error(f"Zayıf: {', '.join(weak)}")
+    c2.success(f"Güçlü: {', '.join(strong)}")
     
-    tab1, tab2, tab3 = st.tabs(["📋 Kadrolar & Fikstür", "🤝 Akıllı Takas", "⚔️ Rakip Analizi"])
+    t1, t2, t3 = st.tabs(["Kadro", "Takas", "Rakip"])
     
-    with tab1:
-        col_a, col_b = st.columns(2)
-        team_filter = col_a.selectbox("Takım Seç:", [MY_TEAM_NAME] + sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME]))
-        roster_view = view_df[view_df['Team'] == team_filter].sort_values(by='Skor', ascending=False)
-        cols_show = ['Player', 'Pos', 'Games_Next_7D', 'Trend', 'Health', 'Skor', 'GP', 'MPG', 'FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
-        st.dataframe(roster_view[cols_show], column_config={"Skor": st.column_config.ProgressColumn("Değer", format="%.1f", min_value=-5, max_value=15), "Games_Next_7D": st.column_config.NumberColumn("7 Gün", format="%d 🏀"), "Trend": st.column_config.TextColumn("Form")}, use_container_width=True, hide_index=True)
+    with t1:
+        tm = st.selectbox("Takım", [MY_TEAM_NAME]+sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME]))
+        show = v_df[v_df['Team']==tm].sort_values('Skor', ascending=False)
+        st.dataframe(show[['Player','Pos','Games_Next_7D','Trend','Health','Skor','GP','MPG','FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']], use_container_width=True, hide_index=True)
         
-    with tab2:
-        opponents = sorted([t for t in df['Team'].unique() if t != MY_TEAM_NAME and t != "Free Agent"])
-        target_opp = st.selectbox("Rakip Takım:", opponents)
-        if st.button("Senaryoları Hesapla"):
-            results_dict = trade_engine_grouped(df, MY_TEAM_NAME, target_opp, weak)
-            t_s, t_m, t_l, t_h = st.tabs(results_dict.keys())
-            for tab, (name, r_df) in zip([t_s, t_m, t_l, t_h], results_dict.items()):
-                with tab:
-                    if not r_df.empty: st.dataframe(r_df.head(15), column_config={"Puan": st.column_config.ProgressColumn("Stratejik Puan", min_value=0, max_value=12)}, use_container_width=True, hide_index=True)
-                    else: st.info(f"Bu grupta ({name}) uygun takas bulunamadı.")
-
-    with tab3:
-        opp_anal = st.selectbox("Rakip:", opponents, key="opp_anal")
-        if opp_anal:
-            cats = ['FG%', 'FT%', '3PTM', 'PTS', 'REB', 'AST', 'ST', 'BLK', 'TO']
-            my_s = df[df['Team'] == MY_TEAM_NAME][cats].mean()
-            op_s = df[df['Team'] == opp_anal][cats].mean()
-            res = []
-            s_me, s_op = 0, 0
+    with t2:
+        ops = sorted([t for t in df['Team'].unique() if t!=MY_TEAM_NAME and t!="Free Agent"])
+        op = st.selectbox("Hedef Takım", ops)
+        if st.button("Hesapla"):
+            res = trade_engine(df, MY_TEAM_NAME, op, weak)
+            ts = st.tabs(list(res.keys()))
+            for t, (k, d) in zip(ts, res.items()):
+                with t:
+                    if not d.empty: st.dataframe(d.head(15), use_container_width=True, hide_index=True)
+                    else: st.info("Takas yok.")
+                    
+    with t3:
+        op_a = st.selectbox("Rakip Analiz", ops)
+        if op_a:
+            cats = ['FG%','FT%','3PTM','PTS','REB','AST','ST','BLK','TO']
+            m, o = df[df['Team']==MY_TEAM_NAME][cats].mean(), df[df['Team']==op_a][cats].mean()
+            data = []
+            sm, so = 0, 0
             for c in cats:
-                v_m = my_s[c]; v_o = op_s[c]
-                win = (v_m < v_o) if c == 'TO' else (v_m > v_o)
-                if win: s_me +=1; res.append({'Kat': c, 'Ben': f"{v_m:.1f}", 'Rakip': f"{v_o:.1f}", 'Kazanan': "✅ Ben"})
-                else: s_op +=1; res.append({'Kat': c, 'Ben': f"{v_m:.1f}", 'Rakip': f"{v_o:.1f}", 'Kazanan': "❌ Rakip"})
+                w = (m[c]<o[c]) if c=='TO' else (m[c]>o[c])
+                if w: sm+=1 
+                else: so+=1
+                data.append({'Kat':c, 'Ben':f"{m[c]:.1f}", 'Rakip':f"{o[c]:.1f}", 'Durum': "✅" if w else "❌"})
             c1, c2 = st.columns(2)
-            c1.metric("Tahmini Skor", f"{s_me} - {s_op}")
-            st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
-else:
-    st.info("Veri bekleniyor...")
+            c1.metric("Skor", f"{sm} - {so}")
+            st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
